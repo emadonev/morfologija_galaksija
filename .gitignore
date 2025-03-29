@@ -4,3 +4,9 @@ galaxy_morph/input/images_gz2/__MACOSX/images/._11.jpg
 galaxy_morph/input/images_gz2.zip
 /wandb
 wandb/
+galaxy_morph/input/filename_mapping.csv
+galaxy_morph/input/gz2_classes.csv
+/output
+output/
+.idea/this_studio.iml
+*.pyc
