@@ -21,11 +21,11 @@ class conv_embedd(nn.Module):
     '''
     This class handles the convolutional embedding needed for the CvT architecture
     '''
-    def __init__(self, in_ch, embed_dim, patch_size, stride):
+    def __init__(self, in_ch, embed_dim, patch_size, stride, padding):
         super().__init__() # initalization
         # creating a conv layer which will embed the input image into tokens
         self.embed = nn.Sequential(
-        nn.Conv2d(in_ch, embed_dim, kernel_size=patch_size, stride=stride)
+        nn.Conv2d(in_ch, embed_dim, kernel_size=patch_size, stride=stride, padding=padding)
     )
         # normalization layer
         self.norm = nn.LayerNorm(embed_dim)
@@ -75,7 +75,7 @@ class multi_head_attention(nn.Module):
             Rearrange('b c h w -> b (h w) c')
         )
         # define the dropout rate for attention not to overfit
-        self.att_drop = nn.Dropout(0.1)
+        self.att_drop = nn.Dropout(0.12)
 
     def forward_conv(self, x):
         # taking in the image and applying convolutions to the query, key and value matrices in order to gain information
@@ -157,7 +157,7 @@ class Block(nn.Module):
     # second norm layer
     self.norm2 = nn.LayerNorm(embed_dim)
     # dropout to prevent overfitting
-    self.dropout = nn.Dropout(0.1)
+    self.dropout = nn.Dropout(0.12)
 
   def forward(self, x):
     # first part of the block is the attention process and then layer normalization
@@ -170,7 +170,7 @@ class VisionTransformer(nn.Module):
   '''
   This class creates the actual vision transformer component
   '''
-  def __init__(self, depth, embed_dim, num_heads, patch_size, stride, in_ch=3, cls_token=False):
+  def __init__(self, depth, embed_dim, num_heads, patch_size, stride, padding, in_ch=3, cls_token=False):
     super().__init__() # init
 
     self.stride = stride # stride init
@@ -178,9 +178,9 @@ class VisionTransformer(nn.Module):
     # creating the layers of the network - creates the number of transformer blocks depending on how deep we want to go into the image
     self.layers = nn.Sequential(*[Block(embed_dim, num_heads, self.cls_token) for _ in range(depth)])
     # defined the convolutional embedding of the rgb component of the image
-    self.embedding = conv_embedd(in_ch, embed_dim, patch_size, stride)
+    self.embedding = conv_embedd(in_ch, embed_dim, patch_size, stride, padding)
     # defined the linear embedding of the auxiliary component of the image - class hint
-    self.hint_embed = chint_embed(1, embed_dim)
+    self.hint_embed = chint_embed(1, embed_dim*6)
     # defining how to merge the cls token and aux token
     self.merge_lin = nn.Linear(2*embed_dim, embed_dim)
 
@@ -190,7 +190,7 @@ class VisionTransformer(nn.Module):
   def forward(self, x, aux_layer=None, ch_out=False):
     B = x.shape[0]
     aux = None
-
+    #print('image shape', x.shape)
     if x.shape[1] == 4:
       # split the rgb component of the image and the auxiliary component of the image
       rgb = x[:, :3, :, :]
@@ -203,15 +203,17 @@ class VisionTransformer(nn.Module):
       aux = self.hint_embed(aux)  # shape: [B, embed_dim]
       # reshape the aux layer so we can concatenate with cls_token
       aux = aux.unsqueeze(1)      # shape: [B, 1, embed_dim]
+      #print('aux layer selected', rgb.shape, aux.shape)
     else:
       rgb = x
 
     rgb, h_out, w_out = self.embedding(rgb)  # conv embedding
-
+    #print('conv embedding shape', rgb.shape)
     if self.cls_token:
       cls_token = einops.repeat(self.cls_token_embed, '1 1 e -> b 1 e', b=B).contiguous()
       rgb = torch.cat([cls_token, rgb], dim=1)
       # If aux_layer is provided, merge it with the cls token.
+      #print('cls_token provided', rgb.shape)
       if aux_layer is not None:
           merged = torch.cat([cls_token, aux_layer], dim=-1)
           cls_aux = self.merge_lin(merged)
@@ -219,12 +221,12 @@ class VisionTransformer(nn.Module):
           rgb[:, 0, :] = cls_aux.squeeze(1)
     
     rgb = self.layers(rgb)
-    
+    #print('passed through attention', rgb.shape)
     if not ch_out:
         if self.cls_token:
             rgb = rgb[:, 1:, :]  
         rgb = einops.rearrange(rgb, 'b (h w) c -> b c h w', h=h_out, w=w_out).contiguous()
-    
+        #print('final out', rgb.shape)
     if aux is not None:
       return rgb, aux
     else:
@@ -244,264 +246,25 @@ class CvT(nn.Module):
                                      num_heads=1,
                                      patch_size=7,
                                      stride=4,
-                                     )
-    # second stage of the network
-    self.stage2 = VisionTransformer(depth=2,
-                                     embed_dim=192,
-                                     num_heads=3,
-                                     patch_size=3,
-                                     stride=2,
-                                     in_ch = 64)
-    # third stage of the network
-    self.stage3 = VisionTransformer(depth=10,
-                                     embed_dim=384,
-                                     num_heads=6,
-                                     patch_size=3,
-                                     stride=2,
-                                     in_ch=192,
-                                     cls_token=True)
-    # final linear layer to create an output
-    self.ff = nn.Sequential(
-        nn.Linear(6*embed_dim, embed_dim),
-        nn.ReLU(),
-        nn.Linear(embed_dim, num_class)
-    )
-
-  def forward(self, x):
-    x, aux = self.stage1(x)
-    x = self.stage2(x)
-    if self.hint:
-      x = self.stage3(x, aux_layer=aux, ch_out=True)
-    else:
-      x = self.stage3(x, aux_layer=None, ch_out=True)
-    x = x[:, 0, :]
-    x = self.ff(x)
-    return x  
-
-class CvT_patch(nn.Module):
-  '''
-  This class combines everything together for the final CvT architecture
-  '''
-  def __init__(self, embed_dim, num_class, hint=False):
-    super().__init__()
-    self.hint = hint
-    # first stage of the network
-    self.stage1 = VisionTransformer(depth=1,
-                                     embed_dim=64,
-                                     num_heads=1,
-                                     patch_size=5,# change
-                                     stride=4,
-                                     )
-    # second stage of the network
-    self.stage2 = VisionTransformer(depth=2,
-                                     embed_dim=192,
-                                     num_heads=3,
-                                     patch_size=3, #change
-                                     stride=2,
-                                     in_ch = 64)
-    # third stage of the network
-    self.stage3 = VisionTransformer(depth=10,
-                                     embed_dim=384,
-                                     num_heads=6,
-                                     patch_size=2, #change
-                                     stride=2,
-                                     in_ch=192,
-                                     cls_token=True)
-    # final linear layer to create an output
-    self.ff = nn.Sequential(
-        nn.Linear(6*embed_dim, embed_dim),
-        nn.ReLU(),
-        nn.Linear(embed_dim, num_class)
-    )
-
-  def forward(self, x):
-    x, aux = self.stage1(x)
-    x = self.stage2(x)
-    if self.hint:
-      x = self.stage3(x, aux_layer=aux, ch_out=True)
-    else:
-      x = self.stage3(x, aux_layer=None, ch_out=True)
-    x = x[:, 0, :]
-    x = self.ff(x)
-    return x  
-
-class CvT_depth(nn.Module):
-  '''
-  This class combines everything together for the final CvT architecture
-  '''
-  def __init__(self, embed_dim, num_class, hint=False):
-    super().__init__()
-    self.hint = hint
-    # first stage of the network
-    self.stage1 = VisionTransformer(depth=2, # change
-                                     embed_dim=64,
-                                     num_heads=1,
-                                     patch_size=7,
-                                     stride=4,
-                                     )
-    # second stage of the network
-    self.stage2 = VisionTransformer(depth=4,# change
-                                     embed_dim=192,
-                                     num_heads=3,
-                                     patch_size=3,
-                                     stride=2,
-                                     in_ch = 64)
-    # third stage of the network
-    self.stage3 = VisionTransformer(depth=10,# change
-                                     embed_dim=384,
-                                     num_heads=6,
-                                     patch_size=3,
-                                     stride=2,
-                                     in_ch=192,
-                                     cls_token=True)
-    # final linear layer to create an output
-    self.ff = nn.Sequential(
-        nn.Linear(6*embed_dim, embed_dim),
-        nn.ReLU(),
-        nn.Linear(embed_dim, num_class)
-    )
-
-  def forward(self, x):
-    x, aux = self.stage1(x)
-    x = self.stage2(x)
-    if self.hint:
-      x = self.stage3(x, aux_layer=aux, ch_out=True)
-    else:
-      x = self.stage3(x, aux_layer=None, ch_out=True)
-    x = x[:, 0, :]
-    x = self.ff(x)
-    return x  
-
-class CvT_heads(nn.Module):
-  '''
-  This class combines everything together for the final CvT architecture
-  '''
-  def __init__(self, embed_dim, num_class,hint=False):
-    super().__init__()
-    self.hint = hint
-    # first stage of the network
-    self.stage1 = VisionTransformer(depth=1,
-                                     embed_dim=64, # change
-                                     num_heads=2,
-                                     patch_size=7,
-                                     stride=4,
-                                     )
-    # second stage of the network
-    self.stage2 = VisionTransformer(depth=2,
-                                     embed_dim=128, # change
-                                     num_heads=4,
-                                     patch_size=3,
-                                     stride=2,
-                                     in_ch = 64)
-    # third stage of the network
-    self.stage3 = VisionTransformer(depth=10,
-                                     embed_dim=384, # change
-                                     num_heads=6,
-                                     patch_size=3,
-                                     stride=2,
-                                     in_ch=128,
-                                     cls_token=True)
-    # final linear layer to create an output
-    self.ff = nn.Sequential(
-        nn.Linear(6*embed_dim, embed_dim),
-        nn.ReLU(),
-        nn.Linear(embed_dim, num_class)
-    )
-
-  def forward(self, x):
-    x, aux = self.stage1(x)
-    x = self.stage2(x)
-    if self.hint:
-      x = self.stage3(x, aux_layer=aux, ch_out=True)
-    else:
-      x = self.stage3(x, aux_layer=None, ch_out=True)
-    x = x[:, 0, :]
-    x = self.ff(x)
-    return x  
-
-class CvT_stage(nn.Module):
-  '''
-  This class combines everything together for the final CvT architecture
-  '''
-  def __init__(self, embed_dim, num_class,hint=False):
-    super().__init__()
-    self.hint = hint
-    # first stage of the network
-    self.stage1 = VisionTransformer(depth=1,
-                                     embed_dim=32,
-                                     num_heads=1,
-                                     patch_size=7,
-                                     stride=4,
-                                     )
-    # second stage of the network
-    self.stage2 = VisionTransformer(depth=2,
-                                     embed_dim=96,
-                                     num_heads=3,
-                                     patch_size=5,
-                                     stride=2,
-                                     in_ch = 32)
-    # third stage of the network
-    self.stage3 = VisionTransformer(depth=10,
-                                     embed_dim=192,
-                                     num_heads=6,
-                                     patch_size=3,
-                                     stride=2,
-                                     in_ch=96)
-
-    self.stage4 = VisionTransformer(depth=10,
-                                     embed_dim=384,
-                                     num_heads=6,
-                                     patch_size=3,
-                                     stride=2,
-                                     in_ch=192,
-                                     cls_token=True)
-    # final linear layer to create an output
-    self.ff = nn.Sequential(
-        nn.Linear(12*embed_dim, embed_dim),
-        nn.ReLU(),
-        nn.Linear(embed_dim, num_class)
-    )
-
-  def forward(self, x):
-    x,aux = self.stage1(x)
-    x = self.stage2(x)
-    x = self.stage3(x)
-    if self.hint:
-      x = self.stage4(x, aux_layer=aux, ch_out=True)
-    else:
-      x = self.stage4(x, aux_layer=None, ch_out=True)
-    x = x[:, 0, :]
-    x = self.ff(x)
-    return x  
-
-class CvT_gmorph(nn.Module):
-  '''
-  This class combines everything together for the final CvT architecture
-  '''
-  def __init__(self, embed_dim, num_class,hint=False):
-    super().__init__()
-    self.hint = hint
-    # first stage of the network
-    self.stage1 = VisionTransformer(depth=1,
-                                     embed_dim=64, # change
-                                     num_heads=2,
-                                     patch_size=5,
-                                     stride=4,
+                                     padding=2
                                      )
     # second stage of the network
     self.stage2 = VisionTransformer(depth=4,
-                                     embed_dim=128, # change
-                                     num_heads=4,
+                                     embed_dim=192,
+                                     num_heads=3,
                                      patch_size=3,
                                      stride=2,
+                                     padding = 1,
                                      in_ch = 64)
     # third stage of the network
-    self.stage3 = VisionTransformer(depth=10,
-                                     embed_dim=384, # change
+    self.stage3 = VisionTransformer(depth=16,
+                                     embed_dim=384,
                                      num_heads=6,
-                                     patch_size=2,
+                                     patch_size=3,
                                      stride=2,
-                                     in_ch=128,
+                                     padding=1,
+                                     in_ch=192,
+
                                      cls_token=True)
     # final linear layer to create an output
     self.ff = nn.Sequential(
@@ -509,7 +272,7 @@ class CvT_gmorph(nn.Module):
         nn.ReLU(),
         nn.Linear(embed_dim, num_class)
     )
-    
+
   def forward(self, x):
     x, aux = self.stage1(x)
     x = self.stage2(x)
@@ -519,4 +282,4 @@ class CvT_gmorph(nn.Module):
       x = self.stage3(x, aux_layer=None, ch_out=True)
     x = x[:, 0, :]
     x = self.ff(x)
-    return x
+    return x  

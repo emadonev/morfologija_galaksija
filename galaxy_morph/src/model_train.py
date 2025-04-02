@@ -108,6 +108,8 @@ def train_model(n_epochs, model, train_loader, valid_loader, loss_func, optimize
     results = {}
     results_class = {}
     time_start = time()
+    trigger = 0
+    patience = 35
     path = '../output/model_'
 
     run = wandb.init(project='gmorph', name=save_name, 
@@ -145,6 +147,15 @@ def train_model(n_epochs, model, train_loader, valid_loader, loss_func, optimize
         f1cv = f1_score(valid_true, valid_pred, average=None)
 
         results_class[epoch] = [train_probs, train_true, precc, recc, f1c, valid_probs, valid_true, preccv, reccv, f1cv]
+
+        if epoch>0:
+            if valid_loss>results[epoch-1][5]:
+                trigger += 1
+                if trigger>=patience:
+                    print("Early stopping!")
+                    print("EPOCH:",epoch)
+                    
+                    return results, results_class, train_pred, train_true, train_probs, valid_pred, valid_true, valid_probs
 
         if save_name:
             torch.save(model.state_dict(), path+save_name+'.pth')
