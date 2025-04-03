@@ -10,3 +10,4 @@ galaxy_morph/input/gz2_classes.csv
 output/
 .idea/this_studio.iml
 *.pyc
+galaxy_morph/input/label_diagram.csv
