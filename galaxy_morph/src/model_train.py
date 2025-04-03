@@ -25,6 +25,9 @@ import torch.nn.functional as F
 
 # ---------------------
 
+def accuracy(predictions, labels, treshold)->int:
+    preds_b = (predictions > treshold).float()
+    return (preds_b == labels).sum().item()
 
 def train_epoch(model, optimizer, data_loader, loss_func, device):
     total_loss = 0
@@ -154,6 +157,10 @@ def train_model(n_epochs, model, train_loader, valid_loader, loss_func, optimize
                 if trigger>=patience:
                     print("Early stopping!")
                     print("EPOCH:",epoch)
+
+                    if save_name:
+                        torch.save(model.state_dict(), path+save_name+'.pth')
+                        print(path + save_name, "is saved!")
                     
                     return results, results_class, train_pred, train_true, train_probs, valid_pred, valid_true, valid_probs
 
@@ -166,3 +173,18 @@ def train_model(n_epochs, model, train_loader, valid_loader, loss_func, optimize
     print("Training time =", (time_end - time_start) / 60, "minutes")
 
     return results, results_class, train_pred, train_true, train_probs, valid_pred, valid_true, valid_probs
+
+
+def test_model(dataset, model, device):
+    model.eval()
+    with torch.no_grad():
+        for imgs, labels in dataset:
+            imgs = imgs.to(device)
+            labels = labels.to(device).view(-1)
+
+            with torch.autocast(device_type=device):
+                outputs = model(imgs)
+                probabilities = F.softmax(outputs, dim=1)
+                preds = probabilities.argmax(dim=1)
+
+    return preds, labels

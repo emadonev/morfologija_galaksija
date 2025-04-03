@@ -1,5 +1,3 @@
-# CREATING A CVT ARCHITECTURE
-
 from torch._tensor import Tensor
 from torch._tensor import Tensor
 import pandas as pd
@@ -36,25 +34,6 @@ class conv_embedd(nn.Module):
         x = einops.rearrange(x, 'b c h w -> b (h w) c').contiguous() # rearrange to token shape
         x = self.norm(x) # normalization layer
         return x, H_out, W_out
-    
-class chint_embed(nn.Module):
-    '''
-    This class handles the auxiliary channel information for prolonged classification
-    '''
-    def __init__(self, c, embed_dim):
-        super().__init__() # initalization
-        # creating a simple linear layer to embed the auxiliary channel information
-        self.embed = nn.Sequential(
-            nn.Linear(c, embed_dim)
-        )
-        # layer norm
-        self.norm = nn.LayerNorm(embed_dim)
-    
-    def forward(self, x):
-        # feeding it forward
-        x = self.embed(x)
-        x = self.norm(x)
-        return x
 
 class multi_head_attention(nn.Module):
     '''
@@ -75,7 +54,7 @@ class multi_head_attention(nn.Module):
             Rearrange('b c h w -> b (h w) c')
         )
         # define the dropout rate for attention not to overfit
-        self.att_drop = nn.Dropout(0.11)
+        self.att_drop = nn.Dropout(0.12)
 
     def forward_conv(self, x):
         # taking in the image and applying convolutions to the query, key and value matrices in order to gain information
@@ -157,7 +136,7 @@ class Block(nn.Module):
     # second norm layer
     self.norm2 = nn.LayerNorm(embed_dim)
     # dropout to prevent overfitting
-    self.dropout = nn.Dropout(0.11)
+    self.dropout = nn.Dropout(0.12)
 
   def forward(self, x):
     # first part of the block is the attention process and then layer normalization
@@ -179,8 +158,6 @@ class VisionTransformer(nn.Module):
     self.layers = nn.Sequential(*[Block(embed_dim, num_heads, self.cls_token) for _ in range(depth)])
     # defined the convolutional embedding of the rgb component of the image
     self.embedding = conv_embedd(in_ch, embed_dim, patch_size, stride, padding)
-    # defined the linear embedding of the auxiliary component of the image - class hint
-    self.hint_embed = chint_embed(1, embed_dim*6)
     # defining how to merge the cls token and aux token
     self.merge_lin = nn.Linear(2*embed_dim, embed_dim)
 
@@ -189,36 +166,14 @@ class VisionTransformer(nn.Module):
 
   def forward(self, x, aux_layer=None, ch_out=False):
     B = x.shape[0]
-    aux = None
-    #print('image shape', x.shape)
-    if x.shape[1] == 4:
-      # split the rgb component of the image and the auxiliary component of the image
-      rgb = x[:, :3, :, :]
-      aux = x[:, 3:, :, :]
 
-      # assign the shape of the rgb part
-      # reshape the aux layer to be a single channel
-      aux = aux.mean(dim=[2, 3])  # shape: [B, 1]
-      # embed the aux layer
-      aux = self.hint_embed(aux)  # shape: [B, embed_dim]
-      # reshape the aux layer so we can concatenate with cls_token
-      aux = aux.unsqueeze(1)      # shape: [B, 1, embed_dim]
-      #print('aux layer selected', rgb.shape, aux.shape)
-    else:
-      rgb = x
+    rgb = x
 
     rgb, h_out, w_out = self.embedding(rgb)  # conv embedding
     #print('conv embedding shape', rgb.shape)
     if self.cls_token:
       cls_token = einops.repeat(self.cls_token_embed, '1 1 e -> b 1 e', b=B).contiguous()
       rgb = torch.cat([cls_token, rgb], dim=1)
-      # If aux_layer is provided, merge it with the cls token.
-      #print('cls_token provided', rgb.shape)
-      if aux_layer is not None:
-          merged = torch.cat([cls_token, aux_layer], dim=-1)
-          cls_aux = self.merge_lin(merged)
-          # Replace the cls token with the merged version.
-          rgb[:, 0, :] = cls_aux.squeeze(1)
     
     rgb = self.layers(rgb)
     #print('passed through attention', rgb.shape)
@@ -226,11 +181,8 @@ class VisionTransformer(nn.Module):
         if self.cls_token:
             rgb = rgb[:, 1:, :]  
         rgb = einops.rearrange(rgb, 'b (h w) c -> b c h w', h=h_out, w=w_out).contiguous()
-        #print('final out', rgb.shape)
-    if aux is not None:
-      return rgb, aux
-    else:
-      return rgb
+    
+    return rgb
 
 class CvT(nn.Module):
 
@@ -264,7 +216,6 @@ class CvT(nn.Module):
                                      stride=2,
                                      padding=1,
                                      in_ch=192,
-
                                      cls_token=True)
     # final linear layer to create an output
     self.ff = nn.Sequential(
@@ -274,12 +225,9 @@ class CvT(nn.Module):
     )
 
   def forward(self, x):
-    x, aux = self.stage1(x)
+    x = self.stage1(x)
     x = self.stage2(x)
-    if self.hint:
-      x = self.stage3(x, aux_layer=aux, ch_out=True)
-    else:
-      x = self.stage3(x, aux_layer=None, ch_out=True)
+    x = self.stage3(x, ch_out=True)
     x = x[:, 0, :]
     x = self.ff(x)
     return x  

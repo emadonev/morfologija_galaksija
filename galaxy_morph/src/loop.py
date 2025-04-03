@@ -30,9 +30,10 @@ wandb.login()
 
 sys.path.insert(0,'../src/')
 
-from data_process import *
+from data_processing import *
 from cvt import *
 from model_train import *
+# ----------------
 
 # loading the label_diagram chart for label assignment
 label_diagram = pd.read_csv("../input/label_diagram.csv")
@@ -42,32 +43,18 @@ W, H, C = 224, 224, 4
 
 file_list = create_file_list(imgs_path, label_diagram)
 
-# assortment of label_maps
-runs = {f: () for f in file_list}
+n = 40000/len(file_list)
 
-for i in label_diagram.columns:
-    if i == 'asset_id':
-        continue
-    # Create a mapping from asset_id to the current label value
-    label_map = label_diagram.set_index('asset_id')[i].to_dict()
-    # For each file, append the label value to the tuple already stored (or create a new tuple)
-    for f in file_list:
-        asset_id = int(f.split('/')[-1].split('.')[0]) # select the asset_id
-        label_val = label_map.get(asset_id, None) # get the label value
-        runs[f] = runs.get(f, ()) + (label_val,) # connect the filename and the label value
-        
-print('Labels assigned')
-print(runs[file_list[0]])
-
-n = 50000/len(file_list)
+img_sub, labels_sub = data_setup(file_list, label_diagram, n)
+traino, valido, testo = split_data(img_sub, labels_sub)
 
 # ==================
 
 # LOOP
 # params
-epochs = 60
+epochs = 50
 lr = 0.0001
-tmax = 20
+tmax = epochs
 device= 'cuda' if torch.cuda.is_available() else 'cpu'
 bs = 32
 embed_size = 64
@@ -79,15 +66,21 @@ if __name__ == '__main__':
     print('----------------')
     #  INITIAL DATA SETUP
     # =====================
-    class_mapping, labels_orig, train_dl, valid_dl, test_dl = data_setup_run(runs, file_list, label_diagram, 0, n, bs)
-
+    
+    train_dl, valid_dl, test_dl, y_train, y_valid, y_test, class_mapping = create_data_loaders(traino, valido, testo, label_diagram, 0, bs, aux_train=None, aux_valid=None, aux_test=None)
+    
     # SAVING SETUP
     # ======================
 
     results_runs = []
     results_runs_class = []
 
+    outputs, labels = [], []
 
+    axt = torch.zeros(len(y_train))
+    axv = torch.zeros(len(y_valid))
+    axte = torch.zeros(len(y_test))
+    
     # ======================
     for i in range(1, m):
         print(f'ITERATION{i}')
@@ -98,14 +91,18 @@ if __name__ == '__main__':
         else:
             gmorph_model = CvT(embed_size, len(class_mapping))
 
-        optimizer = torch.optim.AdamW(gmorph_model.parameters(), lr=lr, weight_decay=0.07)
+        optimizer = torch.optim.NAdam(gmorph_model.parameters(), lr=lr)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, tmax, eta_min=1e-6)
         loss_func = nn.CrossEntropyLoss()
 
-        results, results_class, train_pred, train_true, train_probs, valid_pred, valid_true, valid_probs = train_model(epochs, gmorph_model, train_dl, valid_dl, loss_func, optimizer, scheduler, device, save_name=f'r{i}_loop_final')
+        results, results_class, train_pred, train_true, train_probs, valid_pred, valid_true, valid_probs = train_model(epochs, gmorph_model, train_dl, valid_dl, loss_func, optimizer, scheduler, device, save_name=f'r{i}_FINAL')
 
-        results_runs.append(results)
+        results_runs.append((f'r{i}', results))
         results_runs_class.append(results_class)
+
+        out, lab = test_model(test_dl, gmorph_model, device)
+        outputs.append(out.cpu().detach())
+        labels.append(lab.cpu().detach())
 
         del gmorph_model
         del optimizer
@@ -115,7 +112,25 @@ if __name__ == '__main__':
         # PREP FOR NEXT ROUND
         print('Updating data')
         print('---------------')
-        labels_orig_num = [class_mapping[x] for x in labels_orig]
-        print(labels_orig_num[:2])
-        data_setup_run(runs, file_list, label_diagram, i, n, bs, labels_orig_num)
 
+        axt += y_train
+        axv += y_valid
+        axte += y_test
+
+        train_dl, valid_dl, test_dl, y_train, y_valid, y_test, class_mapping = create_data_loaders(traino, valido, testo, label_diagram, i, bs, aux_train=axt, aux_valid=axv, aux_test=axte)
+    
+    print('Loop is finished!')
+
+    results_runs = np.array(results_runs)
+    results_runs_class = np.array(results_runs_class)
+
+    print(outputs[0], labels[0])
+    print(outputs[1], labels[1])
+
+    outputs = np.array([x.cpu().detach().numpy() for x in outputs])
+    labels = np.array([x.cpu().detach().numpy() for x in labels])
+
+    np.save('../output/results_runs.npy', results_runs, allow_pickle=True)
+    np.save('../output/results_runs_class.npy', results_runs_class, allow_pickle=True)
+    np.save('../output/outputs_test.npy', outputs, allow_pickle=True)
+    np.save('../output/labels_test.npy', labels, allow_pickle=True)
