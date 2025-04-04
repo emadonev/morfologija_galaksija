@@ -9,6 +9,7 @@ from sklearn.model_selection import train_test_split
 import torch
 import matplotlib.pyplot as plt
 import cv2
+import random
 
 # ============
 
@@ -96,6 +97,18 @@ def img_process(entry):
 
     return np.vstack([img_data, label_layer]), int((entry.split("/")[-1]).split('.')[0])
 
+def img_process_bench(entry):
+    img = cv2.imread(entry)
+    if img is None:
+        print(f"Warning: Failed to load image: {entry}")
+    img = cv2.resize(img, (W, H))
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    img_data = img.astype('float32') / 255.0
+    img_data = np.transpose(img_data, (2, 0, 1))
+
+    return img_data, int((entry.split("/")[-1]).split('.')[0])
+
+
 class galaxy_img_dataset(Dataset):
     def __init__(self, file_list, data, label_mapping=None, class_mapping=None, aux_layer=None):
         self.file_list = file_list
@@ -127,6 +140,27 @@ class galaxy_img_dataset(Dataset):
         
         return torch.tensor(img), torch.tensor(label)
 
+class galaxy_img_dataset_bench(Dataset):
+    def __init__(self, file_list, label_mapping, class_mapping=None):
+        self.file_list = file_list
+        self.label_mapping = label_mapping
+        if class_mapping:
+            self.class_mapping = class_mapping
+
+    def __len__(self):
+        return len(self.file_list)
+
+    def __getitem__(self, idx):
+        img, asset_id = img_process_bench(self.file_list[idx])
+        label = self.label_mapping.get(asset_id, None)
+        
+        if label is not None and label in self.class_mapping:
+            label = self.class_mapping[label]
+        else:
+            label = 0  # or some default value or raise an error
+
+        return torch.tensor(img), torch.tensor(label)
+
 # =================
 
 # original split of data
@@ -149,13 +183,25 @@ def data_setup(file_list, label_diagram, n):
 
     images_orig = [x[0] for x in run]
     labels_orig = [x[1] for x in run]
-    print(len(images_orig), len(labels_orig))
-    print(images_orig[:2])
-    print(labels_orig[:2])
+    
+    pairs = [(images_orig[x],labels_orig[x]) for x in range(len(images_orig))]
 
-    img_sub, im, labels_sub, l = train_test_split(images_orig, labels_orig, train_size=n, random_state=42, stratify=labels_orig, shuffle=True)
+    label0 = [x for x in pairs if x[1]=='E']
+    label1 = [x for x in pairs if x[1]=='S']
+    label2 = [x for x in pairs if x[1]=='SB']
+    label3 = [x for x in pairs if x[1]=='Se']
 
-    return img_sub, labels_sub
+    label0_selection = random.sample(label0, n)
+    label1_selection = random.sample(label1, n)
+    label2_selection = random.sample(label2, n)
+    label3_selection = random.sample(label3, n)
+
+    pairs_rand = label0_selection + label1_selection + label2_selection + label3_selection
+
+    images_orig = [x[0] for x in pairs_rand]
+    labels_orig = [x[1] for x in pairs_rand]
+
+    return images_orig, labels_orig
 
 def split_data(x, y):
     x_train, x_rem, y_train, y_rem = train_test_split(x, y, train_size=0.7, random_state=42, 
@@ -165,6 +211,10 @@ def split_data(x, y):
     x_valid, x_test, y_valid, y_test = train_test_split(x_rem, y_rem, test_size=0.34, random_state=42, 
     stratify=y_rem, 
     shuffle=True)
+
+    print(len(x_train), len(x_valid), len(x_test))
+
+    print(x_train[:5], y_train[:5])
 
     return x_train, x_valid, x_test
 
@@ -203,3 +253,33 @@ def create_data_loaders(x_train, x_valid, x_test, label_diagram, run_id, bs, aux
 
     return train_dl, valid_dl, test_dl, y_train, y_valid, y_test, class_mapping
 
+def create_data_loaders_bench(x_train, x_valid, x_test, labels_bench, label_mapping, bs):
+
+    class_mapping = {x : i for i, x in enumerate(sorted(set(labels_bench)))}
+
+    train = galaxy_img_dataset_bench(x_train, label_mapping, class_mapping=class_mapping)
+    valid = galaxy_img_dataset_bench(x_valid, label_mapping, class_mapping=class_mapping)
+    test = galaxy_img_dataset_bench(x_test, label_mapping, class_mapping=class_mapping)
+
+    x_train = torch.stack([x[0] for x in train])
+    y_train = torch.tensor([x[1] for x in train]) 
+
+    print(x_train[0],y_train[0])
+    print(x_train[1],y_train[1])
+
+    x_valid = torch.stack([x[0] for x in valid])    
+    y_valid = torch.tensor([x[1] for x in valid])
+
+    x_test = torch.stack([x[0] for x in test])     
+    y_test = torch.tensor([x[1] for x in test])
+
+    train_ds = TensorDataset(x_train, y_train)
+    train_dl = DataLoader(train_ds, batch_size=bs, shuffle=True, num_workers=16, pin_memory=True)
+
+    valid_ds = TensorDataset(x_valid, y_valid)
+    valid_dl = DataLoader(valid_ds, batch_size=bs, shuffle=True, num_workers=16,pin_memory=True)
+
+    test_ds = TensorDataset(x_test, y_test)
+    test_dl = DataLoader(test_ds, batch_size=bs, shuffle=True, num_workers=16,pin_memory=True)
+
+    return train_dl, valid_dl, test_dl, class_mapping

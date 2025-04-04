@@ -158,8 +158,6 @@ class VisionTransformer(nn.Module):
     self.layers = nn.Sequential(*[Block(embed_dim, num_heads, self.cls_token) for _ in range(depth)])
     # defined the convolutional embedding of the rgb component of the image
     self.embedding = conv_embedd(in_ch, embed_dim, patch_size, stride, padding)
-    # defining how to merge the cls token and aux token
-    self.merge_lin = nn.Linear(2*embed_dim, embed_dim)
 
     if self.cls_token: # if we have a cls token, create an embedding for it
        self.cls_token_embed = nn.Parameter(torch.randn(1, 1, embed_dim))
@@ -184,7 +182,7 @@ class VisionTransformer(nn.Module):
     
     return rgb
 
-class CvT(nn.Module):
+class CvT_bench(nn.Module):
 
   '''
   This class combines everything together for the final CvT architecture

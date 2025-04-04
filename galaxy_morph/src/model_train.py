@@ -42,7 +42,7 @@ def train_epoch(model, optimizer, data_loader, loss_func, device):
 
         optimizer.zero_grad()
         
-        with torch.autocast(device_type=device):
+        with torch.autocast(device_type=device, dtype=torch.float16):
             outputs = model(imgs)
             loss = loss_func(outputs, labels)
         #------
@@ -81,7 +81,7 @@ def valid_epoch(model, data_loader, loss_func, device):
             imgs = imgs.to(device)
             labels = labels.to(device).view(-1)
 
-            with torch.autocast(device_type=device):
+            with torch.autocast(device_type=device, dtype=torch.float16):
                 outputs = model(imgs)
                 loss = loss_func(outputs, labels)
 
@@ -176,15 +176,23 @@ def train_model(n_epochs, model, train_loader, valid_loader, loss_func, optimize
 
 
 def test_model(dataset, model, device):
+    out = torch.tensor([])
+    y_true = torch.tensor([])
+    preds = torch.tensor([])
+
     model.eval()
     with torch.no_grad():
-        for imgs, labels in dataset:
-            imgs = imgs.to(device)
+        for n, batches in enumerate(dataset):
+            images, labels = batches
+            images = images.to(device)
             labels = labels.to(device).view(-1)
-
-            with torch.autocast(device_type=device):
-                outputs = model(imgs)
+            
+            with torch.autocast(device_type=device, dtype=torch.float16):
+                outputs = model(images)
                 probabilities = F.softmax(outputs, dim=1)
-                preds = probabilities.argmax(dim=1)
+                predict = probabilities.argmax(dim=1)
+            
+            y_true = torch.cat((y_true, labels.detach().cpu()), 0)
+            preds = torch.cat((preds, predict.detach().cpu()), 0)
 
-    return preds, labels
+    return y_true, preds
