@@ -29,17 +29,14 @@ W, H = 224, 224
 # --------------
 
 def run1_soft_labels(row):
-    # E = smooth (Task 1)
-    p_e = row["t01_smooth_or_features_a01_smooth_debiased"]
+    # E 
+    p_e = row["a01_smooth"]
 
-    # S = features/disk (Task 1) * no bar (Task 3) * spiral (Task 4)
-    p_s = (
-        row["t01_smooth_or_features_a02_features_or_disk_debiased"] *
-        row["t04_spiral_a08_spiral_debiased"]
-    )
+    # S
+    p_s = (row["a02_features_disk"] * row["a04_edgeon_no"] * row['a08_spiral'])
 
-    # Se = edge-on (Task 2)
-    p_se = row["t02_edgeon_a04_yes_debiased"]
+    # Se
+    p_se = (row["a02_features_disk"] * row['a04_edgeon_yes'])
 
     # Normalize
     total = p_e + p_s + p_se
@@ -52,39 +49,36 @@ def run1_soft_labels(row):
 # ========
 
 def run2_soft_labels(row):
-    # E: r, i, c
-    # Se: r,b,n
 
-    # -----------
+    pr = (row["a01_smooth"] * row['a16_completely_round'])
 
-    pr = (row['t07_rounded_a16_completely_round_debiased'])
+    pi = (row["a01_smooth"] * row['a17_in_between'])
 
-    pi = (row['t07_rounded_a17_in_between_debiased'])
-
-    pc = (row['t07_rounded_a18_cigar_shaped_debiased'])
+    pc = (row["a01_smooth"] * row['a18_cigar_shaped'])
 
     # -----
 
-    pBar = (row['t03_bar_a06_bar_debiased'])
+    pBar = (row["a02_features_disk"] * row["a04_edgeon_no"] * row['a08_spiral'] * row['a06_bar'])
 
-    pnoBar = (row['t03_bar_a07_no_bar_debiased'])
+    pnoBar = (row["a02_features_disk"] * row["a04_edgeon_no"] * row['a08_spiral'] * row['a07_no_bar'])
 
     # -----
 
-    #pSeBulge = (row['t09_bulge_shape_a25_rounded_debiased'] * row["t09_bulge_shape_a26_boxy_debiased"])
+    pSeBulge = (row["a02_features_disk"] * row['a04_edgeon_yes'] * row['a25_round_bulge'] + row["a02_features_disk"] * row['a04_edgeon_yes'] * row["a26_boxy_bulge"])
 
-    #pSenoB = (row["t09_bulge_shape_a27_no_bulge_debiased"])
+    pSenoB = (row["a02_features_disk"] * row['a04_edgeon_yes'] * row["a27_no_bulge"])
 
     # Normalize
-    total = pr + pi + pc + pBar + pnoBar
+    total = pr + pi + pc + pBar + pnoBar + pSeBulge + pSenoB
     if total == 0:
-        return np.aray([0.0,0.0,0.0,0.0,0.0])
+        return np.array([0.0,0.0,0.0,0.0,0.0])
 
-    return np.array([pr, pi, pc, pBar, pnoBar]) / total
+    return np.array([pr, pi, pc, pBar, pnoBar, pSeBulge, pSenoB]) / total
 
 # ----
-def get_label_entropy(soft_label):
-    return entropy(soft_label, base=2)
+def get_label_entropy(soft_label, num):
+    max_entropy = np.log2(num)
+    return (entropy(soft_label, base=2)) / max_entropy if max_entropy > 0 else 0
 
 def create_label_dict1(data):
     soft_label_dict = {
@@ -100,23 +94,23 @@ def create_label_dict2(data):
     }
     return soft_label_dict
 
-def section_spurious(data, soft_label_dict, entropy_threshold=1.6):
+def section_spurious(soft_label_dict, num, entropy_threshold=0.7):
     confident = {}
     spurious = {}
 
     for asset_id, label in soft_label_dict.items():
-        if get_label_entropy(label) > entropy_threshold:
+        if get_label_entropy(label, num) > entropy_threshold:
             spurious[asset_id] = label
         else:
             confident[asset_id] = label
 
     return confident, spurious
 
-def create_file_list(imgs_path, label_dict):
+def create_file_list(imgs_path, label_dict1, label_dict2):
     file_list = glob.glob(os.path.join(imgs_path, '*.jpg'))
     file_list = sorted(file_list)
 
-    file_list = [(f, int(f.split('/')[-1].split('.')[0])) for f in file_list if (int(f.split('/')[-1].split('.')[0]) in label_dict)]
+    file_list = [(f, int(f.split('/')[-1].split('.')[0])) for f in file_list if (int(f.split('/')[-1].split('.')[0]) in label_dict1) and (int(f.split('/')[-1].split('.')[0]) in label_dict2)]
 
     return file_list
 
@@ -131,10 +125,7 @@ def create_file_list(imgs_path, label_dict):
 def create_hard_labels(labels_dict):
     hard_labels = {}
     for asset_id, label in labels_dict.items():
-        if label == np.aray([0.0,0.0,0.0,0.0,0.0]):
-            hard_labels[asset_id] = 5
-        else:
-            hard_labels[asset_id] = int(np.argmax(label))
+        hard_labels[asset_id] = int(np.argmax(label))
     return hard_labels
 
 # =============

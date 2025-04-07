@@ -107,21 +107,13 @@ class galaxy_img_dataset_bench(Dataset):
 
 # original split of data
 
-def data_setup(file_list1, file_list2, labels_dict1, label_dict2, n):
+def data_setup(file_list, labels_dict, n):
     runs = {}
 
-    for f in file_list2:
+    for f in file_list:
         asset_id = f[1]
-        label_val = label_dict2.get(asset_id, None) # get the label value
-        if label_val is None:
-            c += 1
+        label_val = labels_dict.get(asset_id, None) # get the label value
         runs[f[0]] = label_val # connect the filename and the label value
-
-    for g in file_list1:
-        asset_id = g[1]
-        label_val_Se = labels_dict1.get(asset_id, None)
-        if label_val_Se is not None and label_val_Se == 2 and g not in file_list2:
-            runs[g[0]] = label_val_Se+3
 
     print(Counter(list(runs.values())))
 
@@ -138,17 +130,19 @@ def data_setup(file_list1, file_list2, labels_dict1, label_dict2, n):
     label3 = [x for x in pairs if x[1]==3]
     label4 = [x for x in pairs if x[1]==4]
     label5 = [x for x in pairs if x[1]==5]
+    label6 = [x for x in pairs if x[1]==6]
 
-    print(len(label0), len(label1), len(label2), len(label3), len(label4), len(label5))
+    print(len(label0), len(label1), len(label2), len(label3), len(label4), len(label5), len(label6))
 
     label0_selection = random.sample(label0, n-500)
     label1_selection = random.sample(label1, n-500)
     label2_selection = random.sample(label2, n-500)
     label3_selection = random.sample(label3, n)
     label4_selection = random.sample(label4, n)
-    label5_selection = random.sample(label5, n*2)
+    label5_selection = random.sample(label5, n)
+    label6_selection = random.sample(label6, n)
 
-    pairs_rand = label0_selection + label1_selection + label2_selection + label3_selection + label4_selection + label5_selection
+    pairs_rand = label0_selection + label1_selection + label2_selection + label3_selection + label4_selection + label5_selection + label6_selection
 
     images_orig = [x[0] for x in pairs_rand]
     labels_orig = [x[1] for x in pairs_rand]
@@ -173,10 +167,10 @@ def split_data(x, y):
 def create_data_loaders(xt, xv, xte, hard_labels, soft_labels_dict, bs, aux_train=None, aux_valid=None, aux_test=None):
 
     def get_dataset(x, aux, split):
-        #if split == "train":
-            #return galaxy_img_dataset(x, hard_labels=hard_labels,aux_layer=aux,soft_labels_dict=soft_labels_dict)
-        #else:
-        return galaxy_img_dataset(x, hard_labels=hard_labels,aux_layer=aux,soft_labels_dict=None)
+        if split == "train":
+            return galaxy_img_dataset(x, hard_labels=hard_labels,aux_layer=aux,soft_labels_dict=soft_labels_dict)
+        else:
+            return galaxy_img_dataset(x, hard_labels=hard_labels,aux_layer=aux,soft_labels_dict=None)
     
     train = get_dataset(xt, aux_train, "train")
     valid = get_dataset(xv, aux_valid, "valid")
@@ -186,7 +180,7 @@ def create_data_loaders(xt, xv, xte, hard_labels, soft_labels_dict, bs, aux_trai
     y_train = torch.stack([x[1] for x in train])
 
     print(x_train[0],y_train[1])
-    unique_vals, counts = torch.unique(y_train, return_counts=True)
+    unique_vals, counts = torch.unique(y_train.argmax(dim=1), return_counts=True)
     for val, count in zip(unique_vals, counts):
         print(f"{val.item()}: {count.item()}")
 
@@ -213,7 +207,9 @@ def create_data_loaders(xt, xv, xte, hard_labels, soft_labels_dict, bs, aux_trai
     train_dl = DataLoader(train_ds, batch_size=bs, shuffle=True, num_workers=16, pin_memory=True)
     valid_dl = DataLoader(valid_ds, batch_size=bs, shuffle=False, num_workers=16, pin_memory=True)
     test_dl  = DataLoader(test_ds,  batch_size=bs, shuffle=False, num_workers=16, pin_memory=True)
-
+    for batch in train_dl:
+        print("Batch shape:", len(batch))
+        break
     return train_dl, valid_dl, test_dl, y_train, y_valid, y_test
 
 def create_data_loaders_bench(x_train, x_valid, x_test, hard_labels, bs, soft_labels_dict=None):
