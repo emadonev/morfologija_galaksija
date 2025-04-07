@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt
 
 import torch
 from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import OneHotEncoder
 from sklearn.metrics import accuracy_score
 from torch.utils.data import DataLoader, TensorDataset
 import torch.nn as nn
@@ -29,7 +30,7 @@ sys.path.insert(0,'../src/')
 from data_processing import *
 from model_train import *
 from labeling_system import *
-import cvt as cvt
+import cvt_OHE_full as cvt
 import cvt_benchmark as cvtb
 # -----
 main_runs = pd.read_csv('../input/main_runs.csv')
@@ -59,20 +60,17 @@ traino, valido, testo, y_traino, y_valido, y_testo = split_data(images_orig, lab
 
 print(Counter(y_traino))
 
-train_dl, valid_dl, test_dl, y_train, y_valid, y_test = create_data_loaders(traino, valido, testo, hard_run1_conf, soft_label_dict_run1, bs, aux_train=None, aux_valid=None, aux_test=None)
+train_dl1, valid_dl1, test_dl1, y_train1, y_valid1, y_test1 = create_data_loaders_bench(traino, valido, testo, hard_run1_conf, bs)
 
 # -----
 
-epochs = 25
-epochs2 = 30
-lr = 1e-4
+epochs = 30
+lr = 2e-5
 tmax = epochs
-tmax2 = epochs2
 device= 'cuda' if torch.cuda.is_available() else 'cpu'
-bs = 32
 embed_size = 64
-use_soft_labels = True
 
+"""
 results_runs = []
 results_runs_class = []
 
@@ -85,7 +83,7 @@ axte = torch.zeros(len(y_test))
 gmorph_model = cvt.CvT(embed_size, 3, hint=False)
 
 optimizer = torch.optim.NAdam(gmorph_model.parameters(), lr=lr)
-scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, tmax, eta_min=1e-6)
+scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, tmax, eta_min=2e-6)
 loss_func1 = nn.KLDivLoss(reduction='batchmean')
 loss_func2 = nn.CrossEntropyLoss()
 
@@ -110,13 +108,23 @@ np.save('../output/results_runs_class_run1_final.npy', results_runs_class, allow
 np.save('../output/outputs_test_run1_final.npy', outputs, allow_pickle=True)
 np.save('../output/labels_test_run1_final.npy', labels, allow_pickle=True)
 
-
+"""
 # RUN 2
-axt += y_train.argmax(dim=1)
-axv += y_valid
-axte += torch.tensor(preds.detach().cpu().numpy())
 
-train_dl, valid_dl, test_dl, y_train, y_valid, y_test = create_data_loaders(traino, valido, testo, hard_run2_conf, soft_label_dict_run2, bs, aux_train=axt, aux_valid=axv, aux_test=axte)
+y_train1_array = np.asarray([t.detach().cpu().numpy() if t is not None else None for t in y_train1]).reshape(-1, 1)
+y_valid1_array  = np.asarray([t.detach().cpu().numpy() if t is not None else None for t in y_valid1]).reshape(-1, 1)
+#y_test1_array  = np.asarray([t.detach().cpu().numpy() if t is not None else None for t in y_test1]).reshape(-1, 1)
+
+print(y_train1_array[:3])
+
+encoder = OneHotEncoder(sparse_output=False)
+coarse_train = encoder.fit_transform(y_train1_array)
+coarse_valid = encoder.fit_transform(y_train1_array)
+#coarse_test = encoder.fit_transform(y_train1_array)
+
+print(coarse_train[:5])
+
+train_dl, valid_dl, test_dl, y_train, y_valid, y_test = create_data_loaders_bench(traino, valido, testo, hard_run2_conf, bs, coarse_train, coarse_valid)
 
 results_runs = []
 results_runs_class = []
@@ -126,11 +134,11 @@ outputs, labels = [], []
 gmorph_model = cvt.CvT(embed_size, 7, hint=True)
 
 optimizer = torch.optim.NAdam(gmorph_model.parameters(), lr=lr)
-scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, tmax2, eta_min=1e-6)
+scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, tmax, eta_min=2e-6)
 loss_func1 = nn.KLDivLoss(reduction='batchmean')
 loss_func2 = nn.CrossEntropyLoss()
 
-results, results_class, train_pred, train_true, train_probs, valid_pred, valid_true, valid_probs = train_model(epochs2, gmorph_model, train_dl, valid_dl, loss_func1, loss_func2, optimizer, scheduler, device, save_name='Run_02_final')
+results, results_class, train_pred, train_true, train_probs, valid_pred, valid_true, valid_probs = train_model(epochs, gmorph_model, train_dl, valid_dl, loss_func1, loss_func2, optimizer, scheduler, device, save_name='Run_02_final')
 
 results_runs.append(('r2', results))
 results_runs_class.append(('r2', results_class))

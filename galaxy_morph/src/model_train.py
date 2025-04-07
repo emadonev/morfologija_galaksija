@@ -38,32 +38,32 @@ def train_epoch(model, optimizer, data_loader, loss_func, device):
     y_probs = []
 
     model.train()
-    for imgs, labels in data_loader:
+    for imgs, labels, coarse_labels in data_loader:
         imgs = imgs.to(device)
         labels = labels.to(device)
 
         optimizer.zero_grad()
         
         with torch.autocast(device_type=device, dtype=torch.float16):
-            outputs = model(imgs)
-            log_probs = F.log_softmax(outputs, dim=1)
-            loss = loss_func(log_probs, labels)
+            #outputs = model(imgs)
+            #log_probs = F.log_softmax(outputs, dim=1)
+            #loss = loss_func(log_probs, labels)
+
+            outputs = model(imgs, coarse_labels)
+            loss = loss_func(outputs, labels)
+
         #------
         loss.backward()
         optimizer.step()
         
-
         total_loss += loss.item()*labels.size(0)
 
-        probs = log_probs.exp()
-        # Convert soft labels to hard labels by taking the argmax
-        true_hard = labels.argmax(dim=1)
-        # Get predictions (hard) from the probabilities
-        preds = probs.argmax(dim=1)
+        probabilities = F.softmax(outputs, dim=1)
+        preds = probabilities.argmax(dim=1)
         
-        y_true.extend(true_hard.detach().cpu().numpy().tolist())
+        y_true.extend(labels.detach().cpu().numpy().tolist())
         y_pred.extend(preds.detach().cpu().numpy().tolist())
-        y_probs.extend(probs.detach().cpu().numpy().tolist())
+        y_probs.extend(probabilities.detach().cpu().numpy().tolist())
 
         loss_train = total_loss / len(data_loader.dataset)
         acc_train = accuracy_score(y_true, y_pred)
@@ -71,7 +71,7 @@ def train_epoch(model, optimizer, data_loader, loss_func, device):
         recall_train = recall_score(y_true, y_pred, average='macro', zero_division=0.0)
         F1_train = f1_score(y_true, y_pred, average='macro')
     
-    return loss_train, acc_train, precision_train, recall_train, F1_train, y_pred, y_true, y_probs
+    return loss_train, acc_train, precision_train, recall_train, F1_train, y_pred, y_true , y_probs
 
 
 def valid_epoch(model, data_loader, loss_func, device):
@@ -82,12 +82,12 @@ def valid_epoch(model, data_loader, loss_func, device):
 
     model.eval()
     with torch.no_grad():
-        for imgs, labels in data_loader:
+        for imgs, labels, coarse_labels in data_loader:
             imgs = imgs.to(device)
             labels = labels.to(device).view(-1)
 
             with torch.autocast(device_type=device, dtype=torch.float16):
-                outputs = model(imgs)
+                outputs = model(imgs, coarse_labels)
                 loss = loss_func(outputs, labels)
 
             total_loss += loss.item()*labels.size(0)
@@ -129,7 +129,7 @@ def train_model(n_epochs, model, train_loader, valid_loader, loss_func1, loss_fu
                              'model': model.__class__.__name__})
     print("Run name:", run.name)
     for epoch in range(n_epochs):
-        train_loss, train_acc, train_prec, train_recall, train_F1, train_pred, train_true, train_probs = train_epoch(model, optimizer, train_loader, loss_func1, device)
+        train_loss, train_acc, train_prec, train_recall, train_F1, train_pred, train_true, train_probs = train_epoch(model, optimizer, train_loader, loss_func2, device)
 
         #train_loss /= len(train_loader.dataset)
 

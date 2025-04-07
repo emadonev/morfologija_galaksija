@@ -59,16 +59,14 @@ class galaxy_img_dataset(Dataset):
 
     def __getitem__(self, idx):
         img, asset_id = img_process(self.file_list[idx])
-        if self.soft_labels_dict:
-            label = self.soft_labels_dict.get(asset_id, None)
-            if label is None:
-                return None, None
-            label = torch.tensor(label, dtype=torch.float32)
-        else:
-            label = self.hard_labels.get(asset_id, None)
-            if label is None:
-                return None, None
-            label = torch.tensor(label, dtype=torch.long)
+        #if self.soft_labels_dict:
+            #label = self.soft_labels_dict.get(asset_id, None)
+            #if label is None:
+                #return None, None
+            #label = torch.tensor(label, dtype=torch.float32)
+        
+        label = self.hard_labels.get(asset_id, None)
+        label = torch.tensor(label, dtype=torch.long)
             
         if self.aux_layer is not None:
             
@@ -80,28 +78,31 @@ class galaxy_img_dataset(Dataset):
         return torch.tensor(img), label
 
 class galaxy_img_dataset_bench(Dataset):
-    def __init__(self, file_list, hard_labels, soft_labels_dict=None):
+    def __init__(self, file_list, hard_labels, coarse_set=None):
         self.file_list = file_list
         self.hard_labels = hard_labels
-        self.soft_labels_dict = soft_labels_dict
+        self.coarse_set = coarse_set
 
     def __len__(self):
         return len(self.file_list)
 
     def __getitem__(self, idx):
         img, asset_id = img_process_bench(self.file_list[idx])
-        if self.soft_labels_dict:
-            label = self.soft_labels_dict.get(asset_id, None)
-            if label is None:
+        if self.coarse_set:
+            coarse_label = self.coarse_set.get(asset_id, None)
+            if coarse_label is None:
                 return None, None
-            label = torch.tensor(label, dtype=torch.float32)
-        else:
-            label = self.hard_labels.get(asset_id, None)
-            if label is None:
-                return None, None
-            label = torch.tensor(label, dtype=torch.long)
+            coarse_label = torch.tensor(coarse_label, dtype=torch.float32)
+        
+        label = self.hard_labels.get(asset_id, None)
+        if label is None:
+            return None, None
+        label = torch.tensor(label, dtype=torch.long)
 
-        return torch.tensor(img, dtype=torch.float32), label
+        if self.coarse_set:
+            return torch.tensor(img, dtype=torch.float32), label, coarse_label
+        else:
+            return torch.tensor(img, dtype=torch.float32), label
 
 # =================
 
@@ -166,93 +167,40 @@ def split_data(x, y):
 
 def create_data_loaders(xt, xv, xte, hard_labels, soft_labels_dict, bs, aux_train=None, aux_valid=None, aux_test=None):
 
-    def get_dataset(x, aux, split):
-        if split == "train":
-            return galaxy_img_dataset(x, hard_labels=hard_labels,aux_layer=aux,soft_labels_dict=soft_labels_dict)
-        else:
-            return galaxy_img_dataset(x, hard_labels=hard_labels,aux_layer=aux,soft_labels_dict=None)
+    def get_dataset(x, aux):
+        return galaxy_img_dataset(x, hard_labels=hard_labels,aux_layer=aux,soft_labels_dict=None)
     
-    train = get_dataset(xt, aux_train, "train")
-    valid = get_dataset(xv, aux_valid, "valid")
-    test  = get_dataset(xte, aux_test,  "test")
+    train_ds = get_dataset(xt, aux_train)
+    valid_ds = get_dataset(xv, aux_valid)
+    test_ds  = get_dataset(xte, aux_test)
 
-    x_train = torch.stack([x[0] for x in train])
-    y_train = torch.stack([x[1] for x in train])
+    y_train, y_valid, y_test = [x[1] for x in train_ds], [x[1] for x in valid_ds], [x[1] for x in test_ds]
 
-    print(x_train[0],y_train[1])
-    unique_vals, counts = torch.unique(y_train.argmax(dim=1), return_counts=True)
-    for val, count in zip(unique_vals, counts):
-        print(f"{val.item()}: {count.item()}")
+    print(train_ds[0][0])
+    print(y_train[0])
 
+    train_dl = DataLoader(train_ds, batch_size=bs, shuffle=True, num_workers=32, pin_memory=True)
+    valid_dl = DataLoader(valid_ds, batch_size=bs, shuffle=True, num_workers=32, pin_memory=True)
+    test_dl  = DataLoader(test_ds,  batch_size=bs, shuffle=True, num_workers=32, pin_memory=True)
 
-    x_valid = torch.stack([x[0] for x in valid])    
-    y_valid = torch.stack([x[1] for x in valid])
-
-    print(x_valid[0],x_valid[1])
-    unique_vals, counts = torch.unique(y_valid, return_counts=True)
-    for val, count in zip(unique_vals, counts):
-        print(f"{val.item()}: {count.item()}")
-
-    x_test = torch.stack([x[0] for x in test])     
-    y_test = torch.stack([x[1] for x in test])
-
-    print(x_test[0],x_test[1])
-
-    print(x_train.shape, len(y_train), x_valid.shape, len(y_valid), x_test.shape, len(y_test))
-
-    train_ds = TensorDataset(x_train, y_train)
-    valid_ds = TensorDataset(x_valid, y_valid)
-    test_ds = TensorDataset(x_test, y_test)
-
-    train_dl = DataLoader(train_ds, batch_size=bs, shuffle=True, num_workers=16, pin_memory=True)
-    valid_dl = DataLoader(valid_ds, batch_size=bs, shuffle=False, num_workers=16, pin_memory=True)
-    test_dl  = DataLoader(test_ds,  batch_size=bs, shuffle=False, num_workers=16, pin_memory=True)
-    for batch in train_dl:
-        print("Batch shape:", len(batch))
-        break
     return train_dl, valid_dl, test_dl, y_train, y_valid, y_test
 
-def create_data_loaders_bench(x_train, x_valid, x_test, hard_labels, bs, soft_labels_dict=None):
+def create_data_loaders_bench(x_train, x_valid, x_test, hard_labels, bs, coarse_train=None, coarse_valid=None):
 
-    train = galaxy_img_dataset_bench(x_train, hard_labels, soft_labels_dict=soft_labels_dict)
-    valid = galaxy_img_dataset_bench(x_valid, hard_labels)
-    test = galaxy_img_dataset_bench(x_test, hard_labels)
+    def get_dataset(x, coarse_set=None):
+        return galaxy_img_dataset_bench(x, hard_labels=hard_labels, coarse_set=coarse_set)
+    
+    train_ds = get_dataset(x_train, coarse_train)
+    valid_ds = get_dataset(x_valid, coarse_valid)
+    test_ds  = get_dataset(x_test)
 
-    x_train = torch.stack([x[0] for x in train])
-    y_train = torch.stack([x[1] for x in train])
+    y_train, y_valid, y_test = [x[1] for x in train_ds], [x[1] for x in valid_ds], [x[1] for x in test_ds]
 
-    print(x_train[0],x_train[1])
-    print(y_train[0], y_train[1])
+    print(train_ds[0][0])
+    print(y_train[0])
 
-    x_valid = torch.stack([x[0] for x in valid])    
-    y_valid = torch.stack([x[1] for x in valid])
+    train_dl = DataLoader(train_ds, batch_size=bs, shuffle=True, num_workers=32, pin_memory=True)
+    valid_dl = DataLoader(valid_ds, batch_size=bs, shuffle=True, num_workers=32, pin_memory=True)
+    test_dl  = DataLoader(test_ds,  batch_size=bs, shuffle=True, num_workers=32, pin_memory=True)
 
-    print(x_valid[0],x_valid[1])
-    print(y_valid[0], y_valid[1])
-
-    x_test = torch.stack([x[0] for x in test])     
-    y_test = torch.stack([x[1] for x in test])
-
-    print(x_test[0],x_test[1])
-    print(y_test[0], y_test[1])
-
-    print(x_train.shape, len(y_train), x_valid.shape, len(y_valid), x_test.shape, len(y_test))
-
-    train_ds = TensorDataset(x_train, y_train)
-    valid_ds = TensorDataset(x_valid, y_valid)
-    test_ds = TensorDataset(x_test, y_test)
-
-    train_dl = DataLoader(train_ds, batch_size=bs, shuffle=True, num_workers=16, pin_memory=True)
-    valid_dl = DataLoader(valid_ds, batch_size=bs, shuffle=False, num_workers=16, pin_memory=True)
-    test_dl  = DataLoader(test_ds,  batch_size=bs, shuffle=False, num_workers=16, pin_memory=True)
-
-    return train_dl, valid_dl, test_dl
-
-def filter_out_class(file_list, labels, excluded_class):
-    # Create a list of (file, label) pairs that do not belong to the excluded class
-    filtered = [(f, label) for f, label in zip(file_list, labels) if label != excluded_class]
-    if filtered:
-        filtered_files, filtered_labels = zip(*filtered)
-        return list(filtered_files), list(filtered_labels)
-    else:
-        return [], []
+    return train_dl, valid_dl, test_dl, y_train, y_valid, y_test
