@@ -25,7 +25,7 @@ W, H = 224, 224
 
 # RUN 1
 # =======
-# E, S, SB, Se
+# E, S, Se
 # --------------
 
 def run1_soft_labels(row):
@@ -35,14 +35,6 @@ def run1_soft_labels(row):
     # S = features/disk (Task 1) * no bar (Task 3) * spiral (Task 4)
     p_s = (
         row["t01_smooth_or_features_a02_features_or_disk_debiased"] *
-        row["t03_bar_a07_no_bar_debiased"] *
-        row["t04_spiral_a08_spiral_debiased"]
-    )
-
-    # SB = features/disk * bar * spiral
-    p_sb = (
-        row["t01_smooth_or_features_a02_features_or_disk_debiased"] *
-        row["t03_bar_a06_bar_debiased"] *
         row["t04_spiral_a08_spiral_debiased"]
     )
 
@@ -50,11 +42,11 @@ def run1_soft_labels(row):
     p_se = row["t02_edgeon_a04_yes_debiased"]
 
     # Normalize
-    total = p_e + p_s + p_sb + p_se
+    total = p_e + p_s + p_se
     if total == 0:
-        return np.array([1.0, 0.0, 0.0, 0.0])  # fallback: assume elliptical
+        return np.array([1.0, 0.0, 0.0])  # fallback: assume elliptical
 
-    return np.array([p_e, p_s, p_sb, p_se]) / total
+    return np.array([p_e, p_s, p_se]) / total
 
 # RUN 2
 # ========
@@ -73,18 +65,22 @@ def run2_soft_labels(row):
 
     # -----
 
-    pSer = (row['t09_bulge_shape_a25_rounded_debiased'])
+    pBar = (row['t03_bar_a06_bar_debiased'])
 
-    pSeb = (row['t09_bulge_shape_a26_boxy_debiased'])
+    pnoBar = (row['t03_bar_a07_no_bar_debiased'])
 
-    pSen = (row['t09_bulge_shape_a27_no_bulge_debiased'])
+    # -----
+
+    #pSeBulge = (row['t09_bulge_shape_a25_rounded_debiased'] * row["t09_bulge_shape_a26_boxy_debiased"])
+
+    #pSenoB = (row["t09_bulge_shape_a27_no_bulge_debiased"])
 
     # Normalize
-    total = pr + pi + pc + pSer + pSeb + pSen
+    total = pr + pi + pc + pBar + pnoBar
     if total == 0:
-        return np.array([1.0, 0.0, 0.0, 0.0])  # fallback: assume elliptical
+        return np.aray([0.0,0.0,0.0,0.0,0.0])
 
-    return np.array([pr,pi, pc, pSer, pSeb, pSen]) / total
+    return np.array([pr, pi, pc, pBar, pnoBar]) / total
 
 # ----
 def get_label_entropy(soft_label):
@@ -104,7 +100,7 @@ def create_label_dict2(data):
     }
     return soft_label_dict
 
-def section_spurious(data, soft_label_dict, entropy_threshold=1.5):
+def section_spurious(data, soft_label_dict, entropy_threshold=1.6):
     confident = {}
     spurious = {}
 
@@ -120,7 +116,7 @@ def create_file_list(imgs_path, label_dict):
     file_list = glob.glob(os.path.join(imgs_path, '*.jpg'))
     file_list = sorted(file_list)
 
-    file_list = [f for f in file_list if int(f.split('/')[-1].split('.')[0]) in label_dict]
+    file_list = [(f, int(f.split('/')[-1].split('.')[0])) for f in file_list if (int(f.split('/')[-1].split('.')[0]) in label_dict)]
 
     return file_list
 
@@ -133,7 +129,12 @@ def create_file_list(imgs_path, label_dict):
 # we take the previous labels and just make them into hard predictions with argmax
 
 def create_hard_labels(labels_dict):
-    hard_labels = { asset_id: int(np.argmax(label)) for asset_id, label in labels_dict.items()}
+    hard_labels = {}
+    for asset_id, label in labels_dict.items():
+        if label == np.aray([0.0,0.0,0.0,0.0,0.0]):
+            hard_labels[asset_id] = 5
+        else:
+            hard_labels[asset_id] = int(np.argmax(label))
     return hard_labels
 
 # =============

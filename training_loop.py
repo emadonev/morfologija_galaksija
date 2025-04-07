@@ -25,6 +25,7 @@ import torch.nn.functional as F
 from torch.optim.lr_scheduler import LambdaLR
 
 import pytorch_lightning as pl
+from pytorch_lightning.strategies import DDPStrategy
 
 from data_processing import *
 import cvt as cvt
@@ -55,9 +56,9 @@ class CvTLightning(pl.LightningModule):
 
         if self.use_soft_labels:
             log_probs = F.log_softmax(logits, dim=1)
-            loss = self.loss_fn(log_probs, y.float())
+            loss = self.loss_fn(log_probs, y)
         else:
-            loss = self.loss_fn(logits, y.float())
+            loss = self.loss_fn(logits, y)
 
         preds = logits.argmax(dim=1)
         acc = (preds == y.argmax(dim=1)).float().mean() if self.use_soft_labels else (preds == y).float().mean()
@@ -68,25 +69,15 @@ class CvTLightning(pl.LightningModule):
         recall = recall_score(targets.cpu(), preds.cpu(), average='macro', zero_division=0)
         f1 = f1_score(targets.cpu(), preds.cpu(), average='macro', zero_division=0)
 
-        precision_c = precision_score(targets.cpu(), preds.cpu(), average=None, zero_division=0)
-        recall_c = recall_score(targets.cpu(), preds.cpu(), average=None, zero_division=0)
-        f1_c = f1_score(targets.cpu(), preds.cpu(), average=None, zero_division=0)
-
         self.log("lr", self.trainer.optimizers[0].param_groups[0]['lr'], prog_bar=True)
         
         self.log_dict({
             "train_loss": loss,
             "train_acc": acc,
-            "train_precision": precision,
-            "train_recall": recall,
-            "train_f1": f1,
-        }, prog_bar=True)
-
-        self.log_dict({
-            "train_precision_c": precision_c,
-            "train_recall_c": recall_c,
-            "train_f1_c": f1_c,
-        }, prog_bar=True)
+            "train_precision": float(precision),
+            "train_recall": float(recall),
+            "train_f1": float(f1),
+        }, prog_bar=True, sync_dist=True)
 
         return loss
 
@@ -94,44 +85,40 @@ class CvTLightning(pl.LightningModule):
         x, y = batch
         logits = self(x)
 
-        if self.use_soft_labels:
-            log_probs = F.log_softmax(logits, dim=1)
-            loss = self.loss_fn(log_probs, y.float())
-        else:
-            loss = self.loss_fn(logits, y.float())
+        # Use CrossEntropyLoss which expects targets as indices
+        loss = nn.CrossEntropyLoss()(logits, y)
 
         preds = logits.argmax(dim=1)
-        acc = (preds == y.argmax(dim=1)).float().mean() if self.use_soft_labels else (preds == y).float().mean()
+        acc = (preds == y).float().mean()
 
-        targets = torch.argmax(y, dim=1) if self.use_soft_labels else y
+        precision = precision_score(y.cpu().numpy(), preds.cpu().numpy(), average='macro', zero_division=0)
+        recall = recall_score(y.cpu().numpy(), preds.cpu().numpy(), average='macro', zero_division=0)
+        f1 = f1_score(y.cpu().numpy(), preds.cpu().numpy(), average='macro', zero_division=0)
 
-        precision = precision_score(targets.cpu(), preds.cpu(), average='macro', zero_division=0)
-        recall = recall_score(targets.cpu(), preds.cpu(), average='macro', zero_division=0)
-        f1 = f1_score(targets.cpu(), preds.cpu(), average='macro', zero_division=0)
-
-        precision_c = precision_score(targets.cpu(), preds.cpu(), average=None, zero_division=0)
-        recall_c = recall_score(targets.cpu(), preds.cpu(), average=None, zero_division=0)
-        f1_c = f1_score(targets.cpu(), preds.cpu(), average=None, zero_division=0)
+        precision_c = precision_score(y.cpu().numpy(), preds.cpu().numpy(), average=None, zero_division=0)
+        recall_c = recall_score(y.cpu().numpy(), preds.cpu().numpy(), average=None, zero_division=0)
+        f1_c = f1_score(y.cpu().numpy(), preds.cpu().numpy(), average=None, zero_division=0)
 
         self.log_dict({
             "val_loss": loss,
             "val_acc": acc,
-            "val_precision": precision,
-            "val_recall": recall,
-            "val_f1": f1,
-        }, prog_bar=True)
+            "val_precision": float(precision),
+            "val_recall": float(recall),
+            "val_f1": float(f1),
+        }, prog_bar=True, sync_dist=True)
 
-        self.log_dict({
-            "val_precision_c": precision_c,
-            "val_recall_c": recall_c,
-            "val_f1_c": f1_c,
-        }, prog_bar=True)
+        for i, p in enumerate(precision_c):
+            self.log(f"val_precision_c{i}", float(p), prog_bar=True, sync_dist=True)
+        for i, p in enumerate(recall_c):
+            self.log(f"val_recall_c{i}", float(p), prog_bar=True, sync_dist=True)
+        for i, p in enumerate(f1_c):
+            self.log(f"val_f1_c{i}", float(p), prog_bar=True, sync_dist=True)
 
         self.val_preds.append(preds.cpu())
-        self.val_targets.append(targets.cpu())
+        self.val_targets.append(y.cpu())
 
-        self.log('val_loss', loss, prog_bar=True)
-        self.log('val_acc', acc, prog_bar=True)
+        self.log('val_loss', loss, prog_bar=True, sync_dist=True)
+        self.log('val_acc', acc, prog_bar=True, sync_dist=True)
 
     def configure_optimizers(self):
         optimizer = torch.optim.NAdam(self.model.parameters(), lr=self.lr)
@@ -169,8 +156,8 @@ class CvTLightning(pl.LightningModule):
         x, y = batch
         logits = self(x)
 
-        preds = logits.argmax(dim=1)
-        targets = torch.argmax(y, dim=1) if self.use_soft_labels else y
+        preds = logits.argmax(dim=0)
+        targets = torch.argmax(y, dim=0) if self.use_soft_labels else y
 
         acc = (preds == targets).float().mean()
 
@@ -180,10 +167,10 @@ class CvTLightning(pl.LightningModule):
 
         self.log_dict({
             "test_acc": acc,
-            "test_precision": precision,
-            "test_recall": recall,
-            "test_f1": f1,
-        }, prog_bar=True)
+            "test_precision": float(precision),
+            "test_recall": float(recall),
+            "test_f1": float(f1),
+        }, prog_bar=True, sync_dist=True)
 
         self.test_preds.append(preds.cpu())
         self.test_targets.append(targets.cpu())

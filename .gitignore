@@ -11,3 +11,5 @@ output/
 .idea/this_studio.iml
 *.pyc
 galaxy_morph/input/label_diagram.csv
+/extra
+extra/

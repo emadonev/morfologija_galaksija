@@ -40,13 +40,14 @@ def train_epoch(model, optimizer, data_loader, loss_func, device):
     model.train()
     for imgs, labels in data_loader:
         imgs = imgs.to(device)
-        labels = labels.to(device).view(-1)
+        labels = labels.to(device)
 
         optimizer.zero_grad()
         
         with torch.autocast(device_type=device, dtype=torch.float16):
             outputs = model(imgs)
-            loss = loss_func(outputs, labels)
+            log_probs = F.log_softmax(outputs, dim=1)
+            loss = loss_func(log_probs, labels)
         #------
         loss.backward()
         optimizer.step()
@@ -54,15 +55,17 @@ def train_epoch(model, optimizer, data_loader, loss_func, device):
 
         total_loss += loss.item()*labels.size(0)
 
-        probabilities = F.softmax(outputs, dim=1)
-
-        preds = probabilities.argmax(dim=1)
-
-        y_true.extend(labels.detach().cpu().numpy().tolist())
+        probs = log_probs.exp()
+        # Convert soft labels to hard labels by taking the argmax
+        true_hard = labels.argmax(dim=1)
+        # Get predictions (hard) from the probabilities
+        preds = probs.argmax(dim=1)
+        
+        y_true.extend(true_hard.detach().cpu().numpy().tolist())
         y_pred.extend(preds.detach().cpu().numpy().tolist())
-        y_probs.extend(probabilities.detach().cpu().numpy().tolist())
+        y_probs.extend(probs.detach().cpu().numpy().tolist())
 
-        loss_train = total_loss/len(data_loader.dataset)
+        loss_train = total_loss / len(data_loader.dataset)
         acc_train = accuracy_score(y_true, y_pred)
         precision_train = precision_score(y_true, y_pred, average='macro', zero_division=0.0)
         recall_train = recall_score(y_true, y_pred, average='macro', zero_division=0.0)
@@ -107,7 +110,7 @@ def valid_epoch(model, data_loader, loss_func, device):
     return valid_loss, valid_acc, valid_precision, valid_recall, valid_F1, y_pred, y_true, y_probs
 
 
-def train_model(n_epochs, model, train_loader, valid_loader, loss_func, optimizer, learning_scheduler, device,save_name:str='none'):
+def train_model(n_epochs, model, train_loader, valid_loader, loss_func1, loss_func2, optimizer, learning_scheduler, device,save_name:str='none'):
     model.to(device)
 
     results = {}
@@ -126,7 +129,7 @@ def train_model(n_epochs, model, train_loader, valid_loader, loss_func, optimize
                              'model': model.__class__.__name__})
     print("Run name:", run.name)
     for epoch in range(n_epochs):
-        train_loss, train_acc, train_prec, train_recall, train_F1, train_pred, train_true, train_probs = train_epoch(model, optimizer, train_loader, loss_func, device)
+        train_loss, train_acc, train_prec, train_recall, train_F1, train_pred, train_true, train_probs = train_epoch(model, optimizer, train_loader, loss_func1, device)
 
         #train_loss /= len(train_loader.dataset)
 
@@ -135,7 +138,7 @@ def train_model(n_epochs, model, train_loader, valid_loader, loss_func, optimize
         if learning_scheduler is not None:
             learning_scheduler.step()
 
-        valid_loss, valid_acc, valid_prec, valid_recall, valid_F1, valid_pred, valid_true, valid_probs = valid_epoch(model, valid_loader, loss_func, device)
+        valid_loss, valid_acc, valid_prec, valid_recall, valid_F1, valid_pred, valid_true, valid_probs = valid_epoch(model, valid_loader, loss_func2, device)
         #valid_loss /= len(valid_loader.dataset)
         run.log({'valid_loss': valid_loss, 'valid_acc': valid_acc, 'valid_precision': valid_prec, 'valid_recall': valid_recall, 'valid_F1': valid_F1})
         #if epoch%10 == 0:
