@@ -31,7 +31,15 @@ def accuracy(predictions, labels, treshold)->int:
     preds_b = (predictions > treshold).float()
     return (preds_b == labels).sum().item()
 
-def train_epoch(model, optimizer, data_loader, loss_func, device, max_grad_norm):
+def to_one_hot(labels, num_classes, device='cuda'):
+    # Ensure labels are on the correct device
+    labels = labels.to(device)
+    # Create one-hot tensor on the same device
+    one_hot = torch.zeros(labels.size(0), num_classes, device=device)
+    one_hot.scatter_(1, labels.view(-1, 1), 1)
+    return one_hot
+
+def train_epoch(model, optimizer, data_loader, loss_func, device, max_grad_norm, coarse_labels=None, num_classes=7):
     total_loss = 0
     total_samples = 0
     y_true = []
@@ -43,7 +51,6 @@ def train_epoch(model, optimizer, data_loader, loss_func, device, max_grad_norm)
     for i, data in enumerate(data_loader):
         imgs = data[0]['data'].to(device)
         labels = data[0]['label'].to(device).view(-1).long()
-        coarse_labels = data[0]['coarse_label'].to(device).view(-1).long()
         batch_galaxy_ids = data[0]['galaxy_id'].cpu().numpy()
         batch_size = labels.size(0)
         total_samples += batch_size
@@ -51,8 +58,17 @@ def train_epoch(model, optimizer, data_loader, loss_func, device, max_grad_norm)
         optimizer.zero_grad()
         
         with torch.autocast(device_type=device, dtype=torch.float16):
-            outputs = model(imgs, coarse_labels)
-            loss = loss_func(outputs, labels)
+            if coarse_labels is not None:
+                # Convert coarse labels to one-hot encoding
+                batch_coarse = torch.tensor(coarse_labels[i*data_loader.batch_size:(i+1)*data_loader.batch_size])
+                batch_coarse = to_one_hot(batch_coarse, num_classes, device=device)
+                outputs = model(imgs, coarse_label=batch_coarse)
+            else:
+                outputs = model(imgs)
+            
+            # Extract logits from CvTOutput
+            logits = outputs.logits
+            loss = loss_func(logits, labels)
 
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
@@ -60,7 +76,7 @@ def train_epoch(model, optimizer, data_loader, loss_func, device, max_grad_norm)
         
         total_loss += loss.item() * batch_size
 
-        probabilities = F.softmax(outputs, dim=1)
+        probabilities = F.softmax(logits, dim=1)
         preds = probabilities.argmax(dim=1)
         
         y_true.extend(labels.detach().cpu().numpy().tolist())
@@ -77,7 +93,7 @@ def train_epoch(model, optimizer, data_loader, loss_func, device, max_grad_norm)
     return loss_train, acc_train, precision_train, recall_train, F1_train, y_pred, y_true, y_probs, galaxy_ids
 
 
-def valid_epoch(model, data_loader, loss_func, device):
+def valid_epoch(model, data_loader, loss_func, device, coarse_labels=None, num_classes=7):
     total_loss = 0
     total_samples = 0
     y_true = []
@@ -90,18 +106,26 @@ def valid_epoch(model, data_loader, loss_func, device):
         for i, data in enumerate(data_loader):
             imgs = data[0]['data'].to(device)
             labels = data[0]['label'].to(device).view(-1).long()
-            coarse_labels = data[0]['coarse_label'].to(device).view(-1).long()
             batch_galaxy_ids = data[0]['galaxy_id'].cpu().numpy()
             batch_size = labels.size(0)
             total_samples += batch_size
 
             with torch.autocast(device_type=device, dtype=torch.float16):
-                outputs = model(imgs, coarse_labels)
-                loss = loss_func(outputs, labels)
+                if coarse_labels is not None:
+                    # Convert coarse labels to one-hot encoding
+                    batch_coarse = torch.tensor(coarse_labels[i*data_loader.batch_size:(i+1)*data_loader.batch_size])
+                    batch_coarse = to_one_hot(batch_coarse, num_classes, device=device)
+                    outputs = model(imgs, coarse_label=batch_coarse)
+                else:
+                    outputs = model(imgs)
+                
+                # Extract logits from CvTOutput
+                logits = outputs.logits
+                loss = loss_func(logits, labels)
 
             total_loss += loss.item() * batch_size
 
-            probabilities = F.softmax(outputs, dim=1)
+            probabilities = F.softmax(logits, dim=1)
             preds = probabilities.argmax(dim=1)
             
             y_true.extend(labels.detach().cpu().numpy().tolist())
@@ -118,7 +142,7 @@ def valid_epoch(model, data_loader, loss_func, device):
     return valid_loss, valid_acc, valid_precision, valid_recall, valid_F1, y_pred, y_true, y_probs, galaxy_ids
 
 
-def train_model(n_epochs, model, train_loader, valid_loader, loss_func, optimizer, learning_scheduler, device, max_grad_norm, save_name:str='none'):
+def train_model(n_epochs, model, train_loader, valid_loader, loss_func, optimizer, learning_scheduler, device, max_grad_norm, save_name:str='none', train_coarse=None, valid_coarse=None, num_classes=7, model_path='../output/'):
     model.to(device)
 
     results = {}
@@ -126,7 +150,6 @@ def train_model(n_epochs, model, train_loader, valid_loader, loss_func, optimize
     time_start = time()
     trigger = 0
     patience = 35
-    path = '../output/benchmark/model_'
 
     run = wandb.init(project='gmorph', name=save_name, 
                      config={'n_epochs': n_epochs, 
@@ -138,14 +161,14 @@ def train_model(n_epochs, model, train_loader, valid_loader, loss_func, optimize
     print("Run name:", run.name)
 
     for epoch in range(n_epochs):
-        train_loss, train_acc, train_prec, train_recall, train_F1, train_pred, train_true, train_probs, train_galaxy_ids = train_epoch(model, optimizer, train_loader, loss_func, device, max_grad_norm)
+        train_loss, train_acc, train_prec, train_recall, train_F1, train_pred, train_true, train_probs, train_galaxy_ids = train_epoch(model, optimizer, train_loader, loss_func, device, max_grad_norm, coarse_labels=train_coarse, num_classes=num_classes)
 
         run.log({'train_loss': train_loss, 'train_acc': train_acc, 'train_precision': train_prec, 'train_recall': train_recall, 'train_F1': train_F1})
 
         if learning_scheduler is not None:
             learning_scheduler.step()
 
-        valid_loss, valid_acc, valid_prec, valid_recall, valid_F1, valid_pred, valid_true, valid_probs, valid_galaxy_ids = valid_epoch(model, valid_loader, loss_func, device)
+        valid_loss, valid_acc, valid_prec, valid_recall, valid_F1, valid_pred, valid_true, valid_probs, valid_galaxy_ids = valid_epoch(model, valid_loader, loss_func, device, coarse_labels=valid_coarse, num_classes=num_classes)
 
         run.log({'valid_loss': valid_loss, 'valid_acc': valid_acc, 'valid_precision': valid_prec, 'valid_recall': valid_recall, 'valid_F1': valid_F1})
 
@@ -171,13 +194,13 @@ def train_model(n_epochs, model, train_loader, valid_loader, loss_func, optimize
                     print("EPOCH:",epoch)
 
                     if save_name:
-                        torch.save(model.state_dict(), path+save_name+'.pth')
-                        print(path + save_name, "is saved!")
+                        torch.save(model.state_dict(), model_path+save_name+'.pth')
+                        print(model_path + 'model_' + save_name, "is saved!")
                     
                     return results, results_class, train_pred, train_true, train_probs, train_galaxy_ids, valid_pred, valid_true, valid_probs, valid_galaxy_ids
 
         if save_name:
-            filename = f"{path}{save_name}_epoch{epoch + 1}.pth"
+            filename = f"{model_path}model_{save_name}_epoch{epoch + 1}.pth"
             torch.save(model.state_dict(), filename)
             print(filename, "is saved!")
             

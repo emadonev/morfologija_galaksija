@@ -6,6 +6,7 @@ from torch.utils.data import Dataset, DataLoader
 from collections import Counter
 import random
 from sklearn.model_selection import train_test_split
+import pickle
 
 # NVIDIA DALI imports
 from nvidia.dali.pipeline import pipeline_def
@@ -85,28 +86,42 @@ def to_one_hot(tensor, num_classes):
         # Handle tensor input
         return torch.zeros(tensor.shape[0], num_classes, device=tensor.device).scatter_(1, tensor.unsqueeze(1), 1)
 
-def create_dali_file_list(file_list, hard_labels, output_filename, test=False, previous_coarse=None):
+def create_dali_file_list(file_list, hard_labels, output_filename, test=False, previous_coarse=None, save_coarse=False):
+    coarse_labels = []
     with open(output_filename, 'w') as f:
         if test and previous_coarse is not None:
             for filepath in file_list:
                 # Extract asset_id from the filename
                 asset_id = int(os.path.splitext(os.path.basename(filepath))[0])
                 label = hard_labels.get(asset_id, None)
-                coarse_label = to_one_hot(previous_coarse, 3)
-                if label is None or coarse_label is None:
+                if label is None:
                     continue  # skip if no label
                 # Write filepath and label
-                f.write(f"{os.path.abspath(filepath)} {label} {coarse_label}\n")
+                f.write(f"{os.path.abspath(filepath)} {label}\n")
+                # Store coarse label for saving if requested
+                if save_coarse:
+                    # Use the previous coarse label directly
+                    coarse_labels.append(previous_coarse)
         else:
             for filepath in file_list:
                 # Extract asset_id from the filename
                 asset_id = int(os.path.splitext(os.path.basename(filepath))[0])
                 label = hard_labels.get(asset_id, None)
-                coarse_label = to_one_hot(label, 3)
-                if label is None or coarse_label is None:
+                if label is None:
                     continue  # skip if no label
                 # Write filepath and label
-                f.write(f"{os.path.abspath(filepath)} {label} {coarse_label}\n")
+                f.write(f"{os.path.abspath(filepath)} {label}\n")
+                # Store coarse label for saving if requested
+                if save_coarse:
+                    # Use the current label directly
+                    coarse_labels.append(label)
+    
+    # Save coarse labels if requested
+    if save_coarse and coarse_labels:
+        coarse_labels_path = output_filename.replace('.txt', '_coarse_labels.pkl')
+        with open(coarse_labels_path, 'wb') as f:
+            pickle.dump(coarse_labels, f)
+    
     return output_filename
 
 # =======
@@ -134,11 +149,10 @@ class GalaxyIDSource:
 @pipeline_def
 def get_dali_pipeline(file_list, random_shuffle=True):
     # Read the file list with labels and coarse labels
-    images, labels, coarse_labels = fn.readers.file(
+    images, labels = fn.readers.file(
         file_list=file_list,
         random_shuffle=random_shuffle,
         name="Reader",
-        num_extra_outputs=2  # Specify that we have 2 extra columns (fine label and coarse label)
     )
     
     # Process images
@@ -152,7 +166,7 @@ def get_dali_pipeline(file_list, random_shuffle=True):
     labels = fn.cast(labels, dtype=types.INT32)
     
     # Convert coarse labels to float32
-    coarse_labels = fn.cast(coarse_labels, dtype=types.FLOAT32)
+    #coarse_labels = fn.cast(coarse_labels, dtype=types.FLOAT32)
     
     # Get galaxy IDs from external source
     galaxy_ids = fn.external_source(
@@ -165,7 +179,7 @@ def get_dali_pipeline(file_list, random_shuffle=True):
     # Ensure galaxy_ids is a single output
     galaxy_ids = galaxy_ids[0] if isinstance(galaxy_ids, (list, tuple)) else galaxy_ids
     
-    return images, labels, coarse_labels, galaxy_ids
+    return images, labels, galaxy_ids
 
 # =======
 
@@ -177,9 +191,21 @@ def create_dali_iterators(x_train, x_valid, x_test, hard_labels, bs, dali_tmp_di
     test_list_file  = os.path.join(dali_tmp_dir, "test_list.txt")
     
     # Write file lists with labels
-    create_dali_file_list(x_train, hard_labels, train_list_file)
-    create_dali_file_list(x_valid, hard_labels, valid_list_file)
-    create_dali_file_list(x_test, hard_labels, test_list_file, test=True, previous_coarse=previous)
+    create_dali_file_list(x_train, hard_labels, train_list_file, save_coarse=True)
+    create_dali_file_list(x_valid, hard_labels, valid_list_file, save_coarse=True)
+    create_dali_file_list(x_test, hard_labels, test_list_file, test=True, previous_coarse=previous, save_coarse=True)
+    
+    # Load saved coarse labels
+    train_coarse_path = train_list_file.replace('.txt', '_coarse_labels.pkl')
+    valid_coarse_path = valid_list_file.replace('.txt', '_coarse_labels.pkl')
+    test_coarse_path = test_list_file.replace('.txt', '_coarse_labels.pkl')
+    
+    with open(train_coarse_path, 'rb') as f:
+        train_coarse_labels = pickle.load(f)
+    with open(valid_coarse_path, 'rb') as f:
+        valid_coarse_labels = pickle.load(f)
+    with open(test_coarse_path, 'rb') as f:
+        test_coarse_labels = pickle.load(f)
     
     # Create pipelines with proper configuration
     train_pipeline = get_dali_pipeline(
@@ -221,23 +247,23 @@ def create_dali_iterators(x_train, x_valid, x_test, hard_labels, bs, dali_tmp_di
     # Create DALI generic iterators with galaxy IDs
     train_iter = DALIGenericIterator(
         pipelines=[train_pipeline],
-        output_map=['data', 'label', 'coarse_label', 'galaxy_id'],
+        output_map=['data', 'label', 'galaxy_id'],
         reader_name="Reader",
         auto_reset=True
     )
     valid_iter = DALIGenericIterator(
         pipelines=[valid_pipeline],
-        output_map=['data', 'label', 'coarse_label','galaxy_id'],
+        output_map=['data', 'label', 'galaxy_id'],
         reader_name="Reader",
         auto_reset=True
     )
     test_iter = DALIGenericIterator(
         pipelines=[test_pipeline],
-        output_map=['data', 'label', 'coarse_label','galaxy_id'],
+        output_map=['data', 'label', 'galaxy_id'],
         reader_name="Reader",
         auto_reset=True
     )
     
-    return train_iter, valid_iter, test_iter
+    return train_iter, valid_iter, test_iter, train_coarse_labels, valid_coarse_labels, test_coarse_labels
 
 # ===========
