@@ -54,7 +54,7 @@ def train_epoch(model, optimizer, data_loader, loss_func, device, max_grad_norm)
         #------
         loss.backward()
 
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
+        #torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
         optimizer.step()
         
         total_loss += loss.item() * batch_size
