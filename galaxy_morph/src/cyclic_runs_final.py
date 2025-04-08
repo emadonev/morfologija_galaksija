@@ -29,11 +29,10 @@ sys.path.insert(0,'../src/')
 
 # -----
 import datap_efficient_runs as drun
-import datap_efficient_bench as dbench
 import model_train_runs as trrun
 import model_train_benchmark as trbench
 from labeling_system import *
-import cvt_OHE_full as cvt
+import cvt_OHE_full_att as cvt
 # -----
 
 main_runs = pd.read_csv('../input/main_runs.csv')

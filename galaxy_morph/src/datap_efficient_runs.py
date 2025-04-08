@@ -78,17 +78,28 @@ def split_data(x, y):
 def to_one_hot(tensor, num_classes):
     return torch.zeros(tensor.shape[0], num_classes, device=tensor.device).scatter_(1, tensor.unsqueeze(1), 1)
 
-def create_dali_file_list(file_list, hard_labels, output_filename):
+def create_dali_file_list(file_list, hard_labels, output_filename, test=False, previous_coarse=None):
     with open(output_filename, 'w') as f:
-        for filepath in file_list:
-            # Extract asset_id from the filename
-            asset_id = int(os.path.splitext(os.path.basename(filepath))[0])
-            label = hard_labels.get(asset_id, None)
-            coarse_label = to_one_hot(label, 3)
-            if label is None or coarse_label is None:
-                continue  # skip if no label
-            # Write filepath and label
-            f.write(f"{os.path.abspath(filepath)} {label} {coarse_label}\n")
+        if test and previous_coarse is not None:
+            for filepath in file_list:
+                # Extract asset_id from the filename
+                asset_id = int(os.path.splitext(os.path.basename(filepath))[0])
+                label = hard_labels.get(asset_id, None)
+                coarse_label = to_one_hot(previous_coarse, 3)
+                if label is None or coarse_label is None:
+                    continue  # skip if no label
+                # Write filepath and label
+                f.write(f"{os.path.abspath(filepath)} {label} {coarse_label}\n")
+        else:
+            for filepath in file_list:
+                # Extract asset_id from the filename
+                asset_id = int(os.path.splitext(os.path.basename(filepath))[0])
+                label = hard_labels.get(asset_id, None)
+                coarse_label = to_one_hot(label, 3)
+                if label is None or coarse_label is None:
+                    continue  # skip if no label
+                # Write filepath and label
+                f.write(f"{os.path.abspath(filepath)} {label} {coarse_label}\n")
     return output_filename
 
 # =======
@@ -144,7 +155,7 @@ def get_dali_pipeline(file_list, random_shuffle=True):
 
 # =======
 
-def create_dali_iterators(x_train, x_valid, x_test, hard_labels, bs, dali_tmp_dir="dali_filelists"):
+def create_dali_iterators(x_train, x_valid, x_test, hard_labels, bs, dali_tmp_dir="dali_filelists", hint=True, previous=None):
     # Create a temporary directory to store file lists if it does not exist.
     os.makedirs(dali_tmp_dir, exist_ok=True)
     train_list_file = os.path.join(dali_tmp_dir, "train_list.txt")
@@ -154,7 +165,7 @@ def create_dali_iterators(x_train, x_valid, x_test, hard_labels, bs, dali_tmp_di
     # Write file lists with labels
     create_dali_file_list(x_train, hard_labels, train_list_file)
     create_dali_file_list(x_valid, hard_labels, valid_list_file)
-    create_dali_file_list(x_test, hard_labels, test_list_file)
+    create_dali_file_list(x_test, hard_labels, test_list_file, test=True, previous_coarse=previous)
     
     # Create pipelines with proper configuration
     train_pipeline = get_dali_pipeline(

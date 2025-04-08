@@ -43,6 +43,7 @@ def train_epoch(model, optimizer, data_loader, loss_func, device, max_grad_norm)
     for i, data in enumerate(data_loader):
         imgs = data[0]['data'].to(device)
         labels = data[0]['label'].to(device).view(-1).long()
+        coarse_labels = data[0]['coarse_label'].to(device).view(-1).long()
         batch_galaxy_ids = data[0]['galaxy_id'].cpu().numpy()
         batch_size = labels.size(0)
         total_samples += batch_size
@@ -50,7 +51,7 @@ def train_epoch(model, optimizer, data_loader, loss_func, device, max_grad_norm)
         optimizer.zero_grad()
         
         with torch.autocast(device_type=device, dtype=torch.float16):
-            outputs = model(imgs)
+            outputs = model(imgs, coarse_labels)
             loss = loss_func(outputs, labels)
 
         loss.backward()
@@ -89,12 +90,13 @@ def valid_epoch(model, data_loader, loss_func, device):
         for i, data in enumerate(data_loader):
             imgs = data[0]['data'].to(device)
             labels = data[0]['label'].to(device).view(-1).long()
+            coarse_labels = data[0]['coarse_label'].to(device).view(-1).long()
             batch_galaxy_ids = data[0]['galaxy_id'].cpu().numpy()
             batch_size = labels.size(0)
             total_samples += batch_size
 
             with torch.autocast(device_type=device, dtype=torch.float16):
-                outputs = model(imgs)
+                outputs = model(imgs, coarse_labels)
                 loss = loss_func(outputs, labels)
 
             total_loss += loss.item() * batch_size
@@ -116,7 +118,7 @@ def valid_epoch(model, data_loader, loss_func, device):
     return valid_loss, valid_acc, valid_precision, valid_recall, valid_F1, y_pred, y_true, y_probs, galaxy_ids
 
 
-def train_model(n_epochs, model, train_loader, valid_loader, loss_func2, optimizer, learning_scheduler, device, max_grad_norm, save_name:str='none'):
+def train_model(n_epochs, model, train_loader, valid_loader, loss_func, optimizer, learning_scheduler, device, max_grad_norm, save_name:str='none'):
     model.to(device)
 
     results = {}
@@ -136,14 +138,14 @@ def train_model(n_epochs, model, train_loader, valid_loader, loss_func2, optimiz
     print("Run name:", run.name)
 
     for epoch in range(n_epochs):
-        train_loss, train_acc, train_prec, train_recall, train_F1, train_pred, train_true, train_probs, train_galaxy_ids = train_epoch(model, optimizer, train_loader, loss_func2, device, max_grad_norm)
+        train_loss, train_acc, train_prec, train_recall, train_F1, train_pred, train_true, train_probs, train_galaxy_ids = train_epoch(model, optimizer, train_loader, loss_func, device, max_grad_norm)
 
         run.log({'train_loss': train_loss, 'train_acc': train_acc, 'train_precision': train_prec, 'train_recall': train_recall, 'train_F1': train_F1})
 
         if learning_scheduler is not None:
             learning_scheduler.step()
 
-        valid_loss, valid_acc, valid_prec, valid_recall, valid_F1, valid_pred, valid_true, valid_probs, valid_galaxy_ids = valid_epoch(model, valid_loader, loss_func2, device)
+        valid_loss, valid_acc, valid_prec, valid_recall, valid_F1, valid_pred, valid_true, valid_probs, valid_galaxy_ids = valid_epoch(model, valid_loader, loss_func, device)
 
         run.log({'valid_loss': valid_loss, 'valid_acc': valid_acc, 'valid_precision': valid_prec, 'valid_recall': valid_recall, 'valid_F1': valid_F1})
 
@@ -197,10 +199,11 @@ def test_model(dataset, model, device):
         for i, data in enumerate(dataset):
             imgs = data[0]['data'].to(device)
             labels = data[0]['label'].to(device).view(-1).long()
+            coarse_labels = data[0]['coarse_label'].to(device).view(-1).long()
             batch_galaxy_ids = data[0]['galaxy_id'].cpu().numpy()
 
             with torch.autocast(device_type=device, dtype=torch.float16):
-                outputs = model(imgs)
+                outputs = model(imgs, coarse_labels)
 
             probabilities = F.softmax(outputs, dim=1)
             preds = probabilities.argmax(dim=1)
