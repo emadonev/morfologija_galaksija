@@ -75,7 +75,7 @@ embed_size = 64
 
 #RUN 1
 # ==========
-train_dl_run1, valid_dl_run1, test_dl_run1 = dbench.create_dali_iterators(traino, valido, testo, hard_run2_conf, bs)
+train_dl_run1, valid_dl_run1, test_dl_run1 = drun.create_dali_iterators(traino, valido, testo, hard_run1_conf, bs)
 
 gmorph_model = cvt.CvT(embed_size, 3, hint=False)
 
@@ -96,7 +96,38 @@ loss_func = nn.CrossEntropyLoss()
 
 results, results_class, train_pred, train_true, train_probs, train_galaxy_ids, valid_pred, valid_true, valid_probs, valid_galaxy_ids = trbench.train_model(epochs, gmorph_model, train_dl_run1, valid_dl_run1, loss_func, optimizer, scheduler, device, max_grad_norm, save_name='RUN_01_full_final')
 
+with open('../output/run1/results_runs_bench_final_true.pkl', 'wb') as f:
+    pickle.dump(results, f)
+
+with open('../output/run1/results_runs_class_bench_final_true.pkl', 'wb') as f:
+    pickle.dump(results_class, f)
+
 # UPDATING THE DATA
 # ------
 
 train_dl_run2, valid_dl_run2, test_dl_run2 = drun.create_dali_iterators(traino, valido, testo, hard_run2_conf, bs)
+
+gmorph_model = cvt.CvT(embed_size, 7, hint=True)
+
+optimizer = torch.optim.AdamW(gmorph_model.parameters(), lr=lr, weight_decay=0.04, betas=(0.9, 0.999), eps=1e-8)
+warmup_epochs = 1
+scheduler = torch.optim.lr_scheduler.OneCycleLR(
+    optimizer,
+    max_lr=lr,
+    epochs=epochs,
+    steps_per_epoch=len(train_dl_run1),
+    pct_start=warmup_epochs/epochs,
+    anneal_strategy='cos',
+    div_factor=25.0,
+    final_div_factor=10000.0
+)
+max_grad_norm = 1.0
+loss_func = nn.CrossEntropyLoss()
+
+results, results_class, train_pred, train_true, train_probs, train_galaxy_ids, valid_pred, valid_true, valid_probs, valid_galaxy_ids = trrun.train_model(epochs, gmorph_model, train_dl_run1, valid_dl_run1, loss_func, optimizer, scheduler, device, max_grad_norm, save_name='RUN_01_full_final')
+
+with open('../output/run2/results_runs_bench_final_true.pkl', 'wb') as f:
+    pickle.dump(results, f)
+
+with open('../output/run2/results_runs_class_bench_final_true.pkl', 'wb') as f:
+    pickle.dump(results_class, f)
