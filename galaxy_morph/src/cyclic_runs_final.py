@@ -58,7 +58,7 @@ conf_file_list = create_file_list(imgs_path, soft_run1_conf, soft_run2_conf)
 # ------
 
 n = 5000
-bs = 128
+bs = 64 # 01 - 128
 images_orig, labels_orig = drun.data_setup(conf_file_list, hard_run2_conf, n)
 traino, valido, testo, y_traino, y_valido, y_testo = drun.split_data(images_orig, labels_orig)
 
@@ -66,7 +66,7 @@ print(Counter(y_traino))
 
 # -----
 epochs = 50
-lr = 1e-4
+lr = 3e-4 # 01 - 1e-4
 tmax = epochs
 device= 'cuda' if torch.cuda.is_available() else 'cpu'
 embed_size = 64
@@ -77,7 +77,7 @@ train_dl_run1, valid_dl_run1, test_dl_run1, train_coarse1, valid_coarse1, test_c
 
 gmorph_model = cvt.CvT_cyclic(embed_size, 3, hint=False)
 
-optimizer = torch.optim.AdamW(gmorph_model.parameters(), lr=lr, weight_decay=0.04, betas=(0.9, 0.999), eps=1e-8)
+optimizer = torch.optim.AdamW(gmorph_model.parameters(), lr=lr, weight_decay=0.05, betas=(0.9, 0.999), eps=1e-8) # 01 - weight=0.04
 warmup_epochs = 5
 scheduler = torch.optim.lr_scheduler.OneCycleLR(
     optimizer,
@@ -87,20 +87,20 @@ scheduler = torch.optim.lr_scheduler.OneCycleLR(
     pct_start=warmup_epochs/epochs,
     anneal_strategy='cos',
     div_factor=25.0,
-    final_div_factor=10000.0
+    final_div_factor=1000.0 # 01 - 10000.0
 )
 max_grad_norm = 1.0
 loss_func = nn.CrossEntropyLoss()
 
 results, results_class, train_pred, train_true, train_probs, train_galaxy_ids, valid_pred, valid_true, valid_probs, valid_galaxy_ids = trrun.train_model(epochs, gmorph_model, train_dl_run1, 
 valid_dl_run1, loss_func, optimizer, scheduler, device, max_grad_norm, 
-save_name='RUN_01_full_final', train_coarse=train_coarse1, valid_coarse=valid_coarse1, 
-num_classes=3, model_path='../output/run1/')
+save_name='RUN_01_full_final_02', train_coarse=train_coarse1, valid_coarse=valid_coarse1, 
+num_classes=3, model_path='../output/run1_02/')
 
-with open('../output/run1/results_runs_bench_final_true.pkl', 'wb') as f:
+with open('../output/run1_02/results_runs_bench_final_true.pkl', 'wb') as f:
     pickle.dump(results, f)
 
-with open('../output/run1/results_runs_class_bench_final_true.pkl', 'wb') as f:
+with open('../output/run1_02/results_runs_class_bench_final_true.pkl', 'wb') as f:
     pickle.dump(results_class, f)
 
 # UPDATING THE DATA
@@ -125,18 +125,18 @@ scheduler = torch.optim.lr_scheduler.OneCycleLR(
     pct_start=warmup_epochs/epochs,
     anneal_strategy='cos',
     div_factor=25.0,
-    final_div_factor=10000.0
+    final_div_factor=1000.0 # 01 - 10000.0
 )
 max_grad_norm = 1.0
 loss_func = nn.CrossEntropyLoss()
 
 results, results_class, train_pred, train_true, train_probs, train_galaxy_ids, valid_pred, valid_true, valid_probs, valid_galaxy_ids = trrun.train_model(epochs, gmorph_model, train_dl_run2, 
 valid_dl_run2, loss_func, optimizer, scheduler, device, max_grad_norm, 
-save_name='RUN_02_full_final', train_coarse=train_coarse2, 
-valid_coarse=valid_coarse2, num_classes=7, model_path='../output/run2/')
+save_name='RUN_02_full_final_02', train_coarse=train_coarse2, 
+valid_coarse=valid_coarse2, num_classes=7, model_path='../output/run2_02/')
 
-with open('../output/run2/results_runs_bench_final_true.pkl', 'wb') as f:
+with open('../output/run2_02/results_runs_bench_final_true.pkl', 'wb') as f:
     pickle.dump(results, f)
 
-with open('../output/run2/results_runs_class_bench_final_true.pkl', 'wb') as f:
+with open('../output/run2_02/results_runs_class_bench_final_true.pkl', 'wb') as f:
     pickle.dump(results_class, f)

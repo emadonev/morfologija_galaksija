@@ -30,7 +30,7 @@ sys.path.insert(0,'../src/')
 from datap_efficient_bench import *
 from model_train_benchmark import *
 from labeling_system import *
-import cvt_benchmark as cvtb
+import cvt_benchmark_attn as cvtb
 # -----
 main_runs = pd.read_csv('../input/main_runs.csv')
 # ------
