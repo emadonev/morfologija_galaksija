@@ -38,9 +38,9 @@ def train_epoch(model, optimizer, data_loader, loss_func, device):
     y_probs = []
 
     model.train()
-    for imgs, labels in data_loader:
-        imgs = imgs.to(device)
-        labels = labels.to(device).view(-1)
+    for i, data in enumerate(data_loader):
+        imgs = data[0]['data'] 
+        labels = data[0]['label']
 
         optimizer.zero_grad()
         
@@ -82,9 +82,9 @@ def valid_epoch(model, data_loader, loss_func, device):
 
     model.eval()
     with torch.no_grad():
-        for imgs, labels in data_loader:
-            imgs = imgs.to(device)
-            labels = labels.to(device).view(-1)
+        for i, data in enumerate(data_loader):
+            imgs = data[0]['data'] 
+            labels = data[0]['label']
 
             with torch.autocast(device_type=device, dtype=torch.float16):
                 outputs = model(imgs)
