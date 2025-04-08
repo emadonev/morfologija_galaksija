@@ -83,19 +83,18 @@ max_grad_norm = 1.0
 
 loss_func2 = nn.CrossEntropyLoss()
 
-results, results_class, train_pred, train_true, train_probs, valid_pred, valid_true, valid_probs = train_model(epochs, gmorph_model, train_iter, valid_iter, loss_func2, optimizer, scheduler, device, max_grad_norm, save_name='benchmark_final_final')
+results, results_class, train_pred, train_true, train_probs, train_galaxy_ids, valid_pred, valid_true, valid_probs, valid_galaxy_ids = train_model(epochs, gmorph_model, train_iter, valid_iter, loss_func2, optimizer, scheduler, device, max_grad_norm, save_name='benchmark_test_maps')
 
-y_true, preds = test_model(test_iter, gmorph_model, device)
+y_true, y_preds, galaxy_ids = test_model(test_iter, gmorph_model, device)
 
 cvtb.cvt_attention_map(gmorph_model, test_iter, device, dest_dir='../output/benchmark/', sel_gal_ids=None)
-
 
 del gmorph_model
 del optimizer
 gc.collect()
 torch.cuda.empty_cache()
 
-outputs = np.array([x.cpu().detach().numpy() for x in preds])
+outputs = np.array([x.cpu().detach().numpy() for x in y_preds])
 labels = np.array([x.cpu().detach().numpy() for x in y_true])
 
 with open('../output/benchmark/results_runs_bench_final_true.pkl', 'wb') as f:
@@ -106,4 +105,3 @@ with open('../output/benchmark/results_runs_class_bench_final_true.pkl', 'wb') a
 
 np.save('../output/benchmark/outputs_test_bench_final_true.npy', outputs, allow_pickle=True)
 np.save('../output/benchmark/labels_test_bench_final_true.npy', labels, allow_pickle=True)
-

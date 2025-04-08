@@ -25,31 +25,39 @@ def create_dali_file_list(file_list, hard_labels, output_filename):
             label = hard_labels.get(asset_id, None)
             if label is None:
                 continue  # skip if no label
+            # Write filepath and label
             f.write(f"{os.path.abspath(filepath)} {label}\n")
     return output_filename
 
 # =======
 
+class GalaxyIDSource:
+    def __init__(self, file_list):
+        self.galaxy_ids = []
+        for f in file_list:
+            # Extract numeric part from filename
+            filename = os.path.basename(f)
+            # Remove file extension and any non-numeric characters
+            numeric_part = ''.join(filter(str.isdigit, os.path.splitext(filename)[0]))
+            if numeric_part:  # Only add if we found a numeric part
+                self.galaxy_ids.append(int(numeric_part))
+            else:
+                # If no numeric part found, use a default ID (0)
+                self.galaxy_ids.append(0)
+        self.total_samples = len(self.galaxy_ids)
+    
+    def __call__(self, sample_info):
+        if sample_info.idx_in_epoch >= self.total_samples:
+            return np.array([0], dtype=np.int32)  # Return default ID for out-of-range indices
+        return np.array([self.galaxy_ids[sample_info.idx_in_epoch]], dtype=np.int32)
+
 @pipeline_def
 def get_dali_pipeline(file_list, random_shuffle=True):
-    # Read the file list
+    # Read the file list with labels
     images, labels = fn.readers.file(
         file_list=file_list, 
         random_shuffle=random_shuffle, 
         name="Reader"
-    )
-    
-    # Extract galaxy IDs from filenames using DALI operators
-    # First get the basename (remove path)
-    basenames = fn.basename(images)
-    # Remove extension and convert to integer
-    galaxy_ids = fn.cast(
-        fn.regex_replace(
-            fn.regex_replace(basenames, pattern="\.[^.]*$", replace=""),  # Remove extension
-            pattern="[^0-9]",  # Remove non-numeric characters
-            replace=""
-        ),
-        dtype=types.INT32
     )
     
     # Process images
@@ -58,6 +66,17 @@ def get_dali_pipeline(file_list, random_shuffle=True):
     images = fn.cast(images, dtype=types.FLOAT)
     images = fn.normalize(images, mean=0.0, stddev=255.0)
     images = fn.transpose(images, perm=[2, 0, 1])
+    
+    # Get galaxy IDs from external source
+    galaxy_ids = fn.external_source(
+        source=GalaxyIDSource(file_list),
+        batch=False,
+        dtype=types.INT32,
+        num_outputs=1
+    )
+    
+    # Ensure galaxy_ids is a single output
+    galaxy_ids = galaxy_ids[0] if isinstance(galaxy_ids, (list, tuple)) else galaxy_ids
     
     return images, labels, galaxy_ids
 
@@ -107,12 +126,12 @@ def create_dali_iterators(x_train, x_valid, x_test, hard_labels, bs, dali_tmp_di
         prefetch_queue_depth=2
     )
     
-    # Build the pipelines (this allocates resources on GPU)
+    # Build the pipelines
     train_pipeline.build()
     valid_pipeline.build()
     test_pipeline.build()
     
-    # Create DALI generic iterators. Note: the output keys will be 'data' and 'label'
+    # Create DALI generic iterators with galaxy IDs
     train_iter = DALIGenericIterator(
         pipelines=[train_pipeline],
         output_map=['data', 'label', 'galaxy_id'],
@@ -131,8 +150,6 @@ def create_dali_iterators(x_train, x_valid, x_test, hard_labels, bs, dali_tmp_di
         reader_name="Reader",
         auto_reset=True
     )
-    
-    return train_iter, valid_iter, test_iter
     
     return train_iter, valid_iter, test_iter
 

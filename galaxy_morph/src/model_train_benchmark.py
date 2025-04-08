@@ -37,11 +37,13 @@ def train_epoch(model, optimizer, data_loader, loss_func, device, max_grad_norm)
     y_true = []
     y_pred = []
     y_probs = []
+    galaxy_ids = []
 
     model.train()
     for i, data in enumerate(data_loader):
         imgs = data[0]['data'].to(device)
         labels = data[0]['label'].to(device).view(-1).long()
+        batch_galaxy_ids = data[0]['galaxy_id'].cpu().numpy()
         batch_size = labels.size(0)
         total_samples += batch_size
 
@@ -51,9 +53,7 @@ def train_epoch(model, optimizer, data_loader, loss_func, device, max_grad_norm)
             outputs = model(imgs)
             loss = loss_func(outputs, labels)
 
-        #------
         loss.backward()
-
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
         optimizer.step()
         
@@ -65,6 +65,7 @@ def train_epoch(model, optimizer, data_loader, loss_func, device, max_grad_norm)
         y_true.extend(labels.detach().cpu().numpy().tolist())
         y_pred.extend(preds.detach().cpu().numpy().tolist())
         y_probs.extend(probabilities.detach().cpu().numpy().tolist())
+        galaxy_ids.extend(batch_galaxy_ids.tolist())
 
         loss_train = total_loss / total_samples
         acc_train = accuracy_score(y_true, y_pred)
@@ -72,7 +73,7 @@ def train_epoch(model, optimizer, data_loader, loss_func, device, max_grad_norm)
         recall_train = recall_score(y_true, y_pred, average='macro', zero_division=0.0)
         F1_train = f1_score(y_true, y_pred, average='macro')
     
-    return loss_train, acc_train, precision_train, recall_train, F1_train, y_pred, y_true , y_probs
+    return loss_train, acc_train, precision_train, recall_train, F1_train, y_pred, y_true, y_probs, galaxy_ids
 
 
 def valid_epoch(model, data_loader, loss_func, device):
@@ -81,12 +82,14 @@ def valid_epoch(model, data_loader, loss_func, device):
     y_true = []
     y_pred = []
     y_probs = []
+    galaxy_ids = []
 
     model.eval()
     with torch.no_grad():
         for i, data in enumerate(data_loader):
             imgs = data[0]['data'].to(device)
             labels = data[0]['label'].to(device).view(-1).long()
+            batch_galaxy_ids = data[0]['galaxy_id'].cpu().numpy()
             batch_size = labels.size(0)
             total_samples += batch_size
 
@@ -97,21 +100,20 @@ def valid_epoch(model, data_loader, loss_func, device):
             total_loss += loss.item() * batch_size
 
             probabilities = F.softmax(outputs, dim=1)
-
             preds = probabilities.argmax(dim=1)
-
+            
             y_true.extend(labels.detach().cpu().numpy().tolist())
             y_pred.extend(preds.detach().cpu().numpy().tolist())
             y_probs.extend(probabilities.detach().cpu().numpy().tolist())
+            galaxy_ids.extend(batch_galaxy_ids.tolist())
 
             valid_loss = total_loss / total_samples
             valid_acc = accuracy_score(y_true, y_pred)
             valid_precision = precision_score(y_true, y_pred, average='macro', zero_division=0.0)
             valid_recall = recall_score(y_true, y_pred, average='macro', zero_division=0.0)
             valid_F1 = f1_score(y_true, y_pred, average='macro')
-
     
-    return valid_loss, valid_acc, valid_precision, valid_recall, valid_F1, y_pred, y_true, y_probs
+    return valid_loss, valid_acc, valid_precision, valid_recall, valid_F1, y_pred, y_true, y_probs, galaxy_ids
 
 
 def train_model(n_epochs, model, train_loader, valid_loader, loss_func2, optimizer, learning_scheduler, device, max_grad_norm, save_name:str='none'):
@@ -134,14 +136,14 @@ def train_model(n_epochs, model, train_loader, valid_loader, loss_func2, optimiz
     print("Run name:", run.name)
 
     for epoch in range(n_epochs):
-        train_loss, train_acc, train_prec, train_recall, train_F1, train_pred, train_true, train_probs = train_epoch(model, optimizer, train_loader, loss_func2, device, max_grad_norm)
+        train_loss, train_acc, train_prec, train_recall, train_F1, train_pred, train_true, train_probs, train_galaxy_ids = train_epoch(model, optimizer, train_loader, loss_func2, device, max_grad_norm)
 
         run.log({'train_loss': train_loss, 'train_acc': train_acc, 'train_precision': train_prec, 'train_recall': train_recall, 'train_F1': train_F1})
 
         if learning_scheduler is not None:
             learning_scheduler.step()
 
-        valid_loss, valid_acc, valid_prec, valid_recall, valid_F1, valid_pred, valid_true, valid_probs = valid_epoch(model, valid_loader, loss_func2, device)
+        valid_loss, valid_acc, valid_prec, valid_recall, valid_F1, valid_pred, valid_true, valid_probs, valid_galaxy_ids = valid_epoch(model, valid_loader, loss_func2, device)
 
         run.log({'valid_loss': valid_loss, 'valid_acc': valid_acc, 'valid_precision': valid_prec, 'valid_recall': valid_recall, 'valid_F1': valid_F1})
 
@@ -157,7 +159,7 @@ def train_model(n_epochs, model, train_loader, valid_loader, loss_func2, optimiz
         reccv = recall_score(valid_true, valid_pred, average=None, zero_division=0)
         f1cv = f1_score(valid_true, valid_pred, average=None)
 
-        results_class[epoch] = [train_probs, train_true, precc, recc, f1c, valid_probs, valid_true, preccv, reccv, f1cv]
+        results_class[epoch] = [train_probs, train_true, train_galaxy_ids, precc, recc, f1c, valid_probs, valid_true, valid_galaxy_ids, preccv, reccv, f1cv]
 
         if epoch>0:
             if valid_loss>results[epoch-1][5]:
@@ -170,7 +172,7 @@ def train_model(n_epochs, model, train_loader, valid_loader, loss_func2, optimiz
                         torch.save(model.state_dict(), path+save_name+'.pth')
                         print(path + save_name, "is saved!")
                     
-                    return results, results_class, train_pred, train_true, train_probs, valid_pred, valid_true, valid_probs
+                    return results, results_class, train_pred, train_true, train_probs, train_galaxy_ids, valid_pred, valid_true, valid_probs, valid_galaxy_ids
 
         if save_name:
             filename = f"{path}{save_name}_epoch{epoch + 1}.pth"
@@ -181,28 +183,30 @@ def train_model(n_epochs, model, train_loader, valid_loader, loss_func2, optimiz
     time_end = time()
     print("Training time =", (time_end - time_start) / 60, "minutes")
 
-    return results, results_class, train_pred, train_true, train_probs, valid_pred, valid_true, valid_probs
+    return results, results_class, train_pred, train_true, train_probs, train_galaxy_ids, valid_pred, valid_true, valid_probs, valid_galaxy_ids
 
 
 def test_model(dataset, model, device):
     out = torch.tensor([])
     y_true = torch.tensor([])
     y_preds = torch.tensor([])
+    galaxy_ids = []
 
     model.eval()
     with torch.no_grad():
         for i, data in enumerate(dataset):
             imgs = data[0]['data'].to(device)
             labels = data[0]['label'].to(device).view(-1).long()
+            batch_galaxy_ids = data[0]['galaxy_id'].cpu().numpy()
 
             with torch.autocast(device_type=device, dtype=torch.float16):
                 outputs = model(imgs)
 
             probabilities = F.softmax(outputs, dim=1)
-
             preds = probabilities.argmax(dim=1)
             
             y_true = torch.cat((y_true, labels.detach().cpu()), 0)
             y_preds = torch.cat((y_preds, preds.detach().cpu()), 0)
+            galaxy_ids.extend(batch_galaxy_ids.tolist())
 
-    return y_true, y_preds
+    return y_true, y_preds, galaxy_ids
