@@ -54,7 +54,7 @@ class multi_head_attention(nn.Module):
             Rearrange('b c h w -> b (h w) c')
         )
         # define the dropout rate for attention not to overfit
-        self.att_drop = nn.Dropout(0.12)
+        self.att_drop = nn.Dropout(0.1)
 
     def forward_conv(self, x):
         # taking in the image and applying convolutions to the query, key and value matrices in order to gain information
@@ -136,7 +136,7 @@ class Block(nn.Module):
     # second norm layer
     self.norm2 = nn.LayerNorm(embed_dim)
     # dropout to prevent overfitting
-    self.dropout = nn.Dropout(0.12)
+    self.dropout = nn.Dropout(0.1)
 
   def forward(self, x):
     # first part of the block is the attention process and then layer normalization
@@ -199,7 +199,7 @@ class CvT_bench(nn.Module):
                                      padding=2
                                      )
     # second stage of the network
-    self.stage2 = VisionTransformer(depth=4,
+    self.stage2 = VisionTransformer(depth=2,
                                      embed_dim=192,
                                      num_heads=3,
                                      patch_size=3,
@@ -207,7 +207,7 @@ class CvT_bench(nn.Module):
                                      padding = 1,
                                      in_ch = 64)
     # third stage of the network
-    self.stage3 = VisionTransformer(depth=16,
+    self.stage3 = VisionTransformer(depth=10,
                                      embed_dim=384,
                                      num_heads=6,
                                      patch_size=3,
@@ -217,7 +217,13 @@ class CvT_bench(nn.Module):
                                      cls_token=True)
     # final linear layer to create an output
     self.ff = nn.Sequential(
-        nn.Linear(6*embed_dim, embed_dim),
+        nn.Linear(6*embed_dim, 4*embed_dim),
+        nn.ReLU(),
+        nn.Dropout(0.1),
+        nn.Linear(4*embed_dim, 2*embed_dim),
+        nn.ReLU(),
+        nn.Dropout(0.1),
+        nn.Linear(2*embed_dim, embed_dim),
         nn.ReLU(),
         nn.Linear(embed_dim, num_class)
     )

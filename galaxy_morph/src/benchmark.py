@@ -53,12 +53,12 @@ W, H, C = 224, 224, 4
 conf_file_list = create_file_list(imgs_path, soft_run1_conf, soft_run2_conf)
 
 n = 5000
-bs = 64
+bs = 128
 images_orig, labels_orig = data_setup(conf_file_list, hard_run2_conf, n)
 traino, valido, testo, y_traino, y_valido, y_testo = split_data(images_orig, labels_orig)
 
-epochs = 30
-lr = 2e-5
+epochs = 40
+lr = 1e-4
 tmax = epochs
 device= 'cuda' if torch.cuda.is_available() else 'cpu'
 embed_size = 64
@@ -66,12 +66,24 @@ embed_size = 64
 train_iter, valid_iter, test_iter = create_dali_iterators(traino, valido, testo, hard_run2_conf, bs)
 
 gmorph_model = cvtb.CvT_bench(embed_size, 7)
-optimizer = torch.optim.NAdam(gmorph_model.parameters(), lr=lr)
-scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, tmax, eta_min=2e-6)
-loss_func1 = nn.KLDivLoss(reduction='batchmean')
+optimizer = torch.optim.AdamW(gmorph_model.parameters(), lr=lr, weight_decay=0.05, betas=(0.9, 0.999), eps=1e-8)
+warmup_epochs = 5
+scheduler = torch.optim.lr_scheduler.OneCycleLR(
+    optimizer,
+    max_lr=lr,
+    epochs=epochs,
+    steps_per_epoch=len(train_iter),
+    pct_start=warmup_epochs/epochs,
+    anneal_strategy='cos',
+    div_factor=25.0,
+    final_div_factor=10000.0
+)
+
+max_grad_norm = 1.0
+
 loss_func2 = nn.CrossEntropyLoss()
 
-results, results_class, train_pred, train_true, train_probs, valid_pred, valid_true, valid_probs = train_model(epochs, gmorph_model, train_iter, valid_iter, loss_func1, loss_func2, optimizer, scheduler, device, save_name='benchmark_final')
+results, results_class, train_pred, train_true, train_probs, valid_pred, valid_true, valid_probs = train_model(epochs, gmorph_model, train_iter, valid_iter, loss_func2, optimizer, scheduler, device, max_grad_norm, save_name='benchmark_final_final')
 
 y_true, preds = test_model(test_iter, gmorph_model, device)
 

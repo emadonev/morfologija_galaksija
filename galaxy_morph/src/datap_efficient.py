@@ -31,11 +31,16 @@ def create_dali_file_list(file_list, hard_labels, output_filename):
 # =======
 
 @pipeline_def
-def get_dali_pipeline(file_list, batch_size, num_threads=4, device_id=0, random_shuffle=True):
+def get_dali_pipeline(file_list, random_shuffle=True):
     # DALI expects a text file where each line is "<image path> <label>"
     images, labels = fn.readers.file(file_list=file_list, random_shuffle=random_shuffle, name="Reader")
     images = fn.decoders.image(images, device="mixed", output_type=types.RGB)
     images = fn.resize(images, resize_x=W, resize_y=H)
+    # Convert to float32 and normalize to [0,1]
+    images = fn.cast(images, dtype=types.FLOAT)
+    images = fn.normalize(images, mean=0.0, stddev=255.0)
+    # Transpose from NHWC to NCHW format
+    images = fn.transpose(images, perm=[2, 0, 1])
     return images, labels
 
 # =======
@@ -52,27 +57,36 @@ def create_dali_iterators(x_train, x_valid, x_test, hard_labels, bs, dali_tmp_di
     create_dali_file_list(x_valid, hard_labels, valid_list_file)
     create_dali_file_list(x_test, hard_labels, test_list_file)
     
-    # Create pipelines. Tune num_threads and device_id as needed.
+    # Create pipelines with proper configuration
     train_pipeline = get_dali_pipeline(
         file_list=train_list_file, 
-        batch_size=bs, 
-        num_threads=4, 
+        random_shuffle=True,
+        batch_size=bs,
+        num_threads=4,
         device_id=0,
-        random_shuffle=True
+        exec_async=True,
+        exec_pipelined=True,
+        prefetch_queue_depth=2
     )
     valid_pipeline = get_dali_pipeline(
         file_list=valid_list_file, 
-        batch_size=bs, 
-        num_threads=4, 
+        random_shuffle=False,
+        batch_size=bs,
+        num_threads=4,
         device_id=0,
-        random_shuffle=False
+        exec_async=True,
+        exec_pipelined=True,
+        prefetch_queue_depth=2
     )
     test_pipeline = get_dali_pipeline(
         file_list=test_list_file, 
-        batch_size=bs, 
-        num_threads=4, 
+        random_shuffle=False,
+        batch_size=bs,
+        num_threads=4,
         device_id=0,
-        random_shuffle=False
+        exec_async=True,
+        exec_pipelined=True,
+        prefetch_queue_depth=2
     )
     
     # Build the pipelines (this allocates resources on GPU)

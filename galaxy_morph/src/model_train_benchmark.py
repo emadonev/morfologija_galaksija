@@ -31,32 +31,33 @@ def accuracy(predictions, labels, treshold)->int:
     preds_b = (predictions > treshold).float()
     return (preds_b == labels).sum().item()
 
-def train_epoch(model, optimizer, data_loader, loss_func, device):
+def train_epoch(model, optimizer, data_loader, loss_func, device, max_grad_norm):
     total_loss = 0
+    total_samples = 0
     y_true = []
     y_pred = []
     y_probs = []
 
     model.train()
     for i, data in enumerate(data_loader):
-        imgs = data[0]['data'] 
-        labels = data[0]['label']
+        imgs = data[0]['data'].to(device)
+        labels = data[0]['label'].to(device).view(-1).long()
+        batch_size = labels.size(0)
+        total_samples += batch_size
 
         optimizer.zero_grad()
         
         with torch.autocast(device_type=device, dtype=torch.float16):
-            #outputs = model(imgs)
-            #log_probs = F.log_softmax(outputs, dim=1)
-            #loss = loss_func(log_probs, labels)
-
             outputs = model(imgs)
             loss = loss_func(outputs, labels)
 
         #------
         loss.backward()
+
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
         optimizer.step()
         
-        total_loss += loss.item()*labels.size(0)
+        total_loss += loss.item() * batch_size
 
         probabilities = F.softmax(outputs, dim=1)
         preds = probabilities.argmax(dim=1)
@@ -65,7 +66,7 @@ def train_epoch(model, optimizer, data_loader, loss_func, device):
         y_pred.extend(preds.detach().cpu().numpy().tolist())
         y_probs.extend(probabilities.detach().cpu().numpy().tolist())
 
-        loss_train = total_loss / len(data_loader.dataset)
+        loss_train = total_loss / total_samples
         acc_train = accuracy_score(y_true, y_pred)
         precision_train = precision_score(y_true, y_pred, average='macro', zero_division=0.0)
         recall_train = recall_score(y_true, y_pred, average='macro', zero_division=0.0)
@@ -76,6 +77,7 @@ def train_epoch(model, optimizer, data_loader, loss_func, device):
 
 def valid_epoch(model, data_loader, loss_func, device):
     total_loss = 0
+    total_samples = 0
     y_true = []
     y_pred = []
     y_probs = []
@@ -83,14 +85,16 @@ def valid_epoch(model, data_loader, loss_func, device):
     model.eval()
     with torch.no_grad():
         for i, data in enumerate(data_loader):
-            imgs = data[0]['data'] 
-            labels = data[0]['label']
+            imgs = data[0]['data'].to(device)
+            labels = data[0]['label'].to(device).view(-1).long()
+            batch_size = labels.size(0)
+            total_samples += batch_size
 
             with torch.autocast(device_type=device, dtype=torch.float16):
                 outputs = model(imgs)
                 loss = loss_func(outputs, labels)
 
-            total_loss += loss.item()*labels.size(0)
+            total_loss += loss.item() * batch_size
 
             probabilities = F.softmax(outputs, dim=1)
 
@@ -100,7 +104,7 @@ def valid_epoch(model, data_loader, loss_func, device):
             y_pred.extend(preds.detach().cpu().numpy().tolist())
             y_probs.extend(probabilities.detach().cpu().numpy().tolist())
 
-            valid_loss = total_loss/len(data_loader.dataset)
+            valid_loss = total_loss / total_samples
             valid_acc = accuracy_score(y_true, y_pred)
             valid_precision = precision_score(y_true, y_pred, average='macro', zero_division=0.0)
             valid_recall = recall_score(y_true, y_pred, average='macro', zero_division=0.0)
@@ -110,7 +114,7 @@ def valid_epoch(model, data_loader, loss_func, device):
     return valid_loss, valid_acc, valid_precision, valid_recall, valid_F1, y_pred, y_true, y_probs
 
 
-def train_model(n_epochs, model, train_loader, valid_loader, loss_func1, loss_func2, optimizer, learning_scheduler, device,save_name:str='none'):
+def train_model(n_epochs, model, train_loader, valid_loader, loss_func2, optimizer, learning_scheduler, device, max_grad_norm, save_name:str='none'):
     model.to(device)
 
     results = {}
@@ -130,7 +134,7 @@ def train_model(n_epochs, model, train_loader, valid_loader, loss_func1, loss_fu
     print("Run name:", run.name)
 
     for epoch in range(n_epochs):
-        train_loss, train_acc, train_prec, train_recall, train_F1, train_pred, train_true, train_probs = train_epoch(model, optimizer, train_loader, loss_func2, device)
+        train_loss, train_acc, train_prec, train_recall, train_F1, train_pred, train_true, train_probs = train_epoch(model, optimizer, train_loader, loss_func2, device, max_grad_norm)
 
         run.log({'train_loss': train_loss, 'train_acc': train_acc, 'train_precision': train_prec, 'train_recall': train_recall, 'train_F1': train_F1})
 
