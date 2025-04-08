@@ -20,6 +20,7 @@ from torch.utils.data import DataLoader, TensorDataset
 import torch.nn as nn
 from tqdm import tqdm
 import wandb
+import pickle
 
 
 wandb.login()
@@ -53,32 +54,24 @@ W, H, C = 224, 224, 4
 
 conf_file_list = create_file_list(imgs_path, soft_run1_conf, soft_run2_conf)
 
-n = 5000
-bs = 64
+n = 1000
+bs = 128
 images_orig, labels_orig = data_setup(conf_file_list, hard_run2_conf, n)
 traino, valido, testo, y_traino, y_valido, y_testo = split_data(images_orig, labels_orig)
 
 print(Counter(y_traino))
 
-train_dl1, valid_dl1, test_dl1, y_train1, y_valid1, y_test1 = create_data_loaders_bench(traino, valido, testo, hard_run1_conf, bs)
-
 # -----
 
-epochs = 30
-lr = 2e-5
+epochs = 1
+lr = 1e-4
 tmax = epochs
 device= 'cuda' if torch.cuda.is_available() else 'cpu'
 embed_size = 64
 
-"""
-results_runs = []
-results_runs_class = []
-
 outputs, labels = [], []
 
-axt = torch.zeros(len(y_train))
-axv = torch.zeros(len(y_valid))
-axte = torch.zeros(len(y_test))
+train_dl1, valid_dl1, test_dl1, y_train1, y_valid1, y_test1 = create_data_loaders_bench(traino, valido, testo, hard_run1_conf, bs)
 
 gmorph_model = cvt.CvT(embed_size, 3, hint=False)
 
@@ -89,26 +82,29 @@ loss_func2 = nn.CrossEntropyLoss()
 
 results, results_class, train_pred, train_true, train_probs, valid_pred, valid_true, valid_probs = train_model(epochs, gmorph_model, train_dl, valid_dl, loss_func1, loss_func2, optimizer, scheduler, device, save_name='Run_01_final')
 
-results_runs.append(('r1', results))
-results_runs_class.append(('r1', results_class))
 
 y_true, preds = test_model(test_dl, gmorph_model, device)
 outputs.append(preds.cpu().detach())
 labels.append(y_true.cpu().detach())
 
 del gmorph_model
+del optimizer
 gc.collect()
 torch.cuda.empty_cache()
 
-outputs = np.array([x.cpu().detach().numpy() for x in outputs])
-labels = np.array([x.cpu().detach().numpy() for x in labels])
+outputs = np.array([x.cpu().detach().numpy() for x in preds])
+labels = np.array([x.cpu().detach().numpy() for x in y_true])
 
-np.save('../output/results_runs_run1_final.npy', results_runs, allow_pickle=True)
-np.save('../output/results_runs_class_run1_final.npy', results_runs_class, allow_pickle=True)
-np.save('../output/outputs_test_run1_final.npy', outputs, allow_pickle=True)
-np.save('../output/labels_test_run1_final.npy', labels, allow_pickle=True)
+with open('../output/benchmark/results_runs_bench_final_true.pkl', 'wb') as f:
+    pickle.dump(results, f)
 
-"""
+with open('../output/benchmark/results_runs_class_bench_final_true.pkl', 'wb') as f:
+    pickle.dump(results_class, f)
+
+np.save('../output/benchmark/outputs_test_bench_final_true.npy', outputs, allow_pickle=True)
+np.save('../output/benchmark/labels_test_bench_final_true.npy', labels, allow_pickle=True)
+
+
 # RUN 2
 
 y_train1_array = torch.tensor([t.detach().cpu().item() if t is not None else 0 for t in y_train1], dtype=torch.long)

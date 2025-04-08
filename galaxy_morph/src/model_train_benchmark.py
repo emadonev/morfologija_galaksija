@@ -54,7 +54,7 @@ def train_epoch(model, optimizer, data_loader, loss_func, device, max_grad_norm)
         #------
         loss.backward()
 
-        #torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
         optimizer.step()
         
         total_loss += loss.item() * batch_size
@@ -122,7 +122,7 @@ def train_model(n_epochs, model, train_loader, valid_loader, loss_func2, optimiz
     time_start = time()
     trigger = 0
     patience = 35
-    path = '../output/model_'
+    path = '../output/benchmark/model_'
 
     run = wandb.init(project='gmorph', name=save_name, 
                      config={'n_epochs': n_epochs, 
@@ -187,21 +187,22 @@ def train_model(n_epochs, model, train_loader, valid_loader, loss_func2, optimiz
 def test_model(dataset, model, device):
     out = torch.tensor([])
     y_true = torch.tensor([])
-    preds = torch.tensor([])
+    y_preds = torch.tensor([])
 
     model.eval()
     with torch.no_grad():
-        for n, batches in enumerate(dataset):
-            images, labels = batches
-            images = images.to(device)
-            labels = labels.to(device).view(-1)
-            
+        for i, data in enumerate(dataset):
+            imgs = data[0]['data'].to(device)
+            labels = data[0]['label'].to(device).view(-1).long()
+
             with torch.autocast(device_type=device, dtype=torch.float16):
-                outputs = model(images)
-                probabilities = F.softmax(outputs, dim=1)
-                predict = probabilities.argmax(dim=1)
+                outputs = model(imgs)
+
+            probabilities = F.softmax(outputs, dim=1)
+
+            preds = probabilities.argmax(dim=1)
             
             y_true = torch.cat((y_true, labels.detach().cpu()), 0)
-            preds = torch.cat((preds, predict.detach().cpu()), 0)
+            y_preds = torch.cat((y_preds, preds.detach().cpu()), 0)
 
-    return y_true, preds
+    return y_true, y_preds

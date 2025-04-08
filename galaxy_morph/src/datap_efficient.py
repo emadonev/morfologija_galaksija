@@ -34,6 +34,7 @@ def create_dali_file_list(file_list, hard_labels, output_filename):
 def get_dali_pipeline(file_list, random_shuffle=True):
     # DALI expects a text file where each line is "<image path> <label>"
     images, labels = fn.readers.file(file_list=file_list, random_shuffle=random_shuffle, name="Reader")
+    galaxy_id = int(os.path.splitext(os.path.basename(images))[0])
     images = fn.decoders.image(images, device="mixed", output_type=types.RGB)
     images = fn.resize(images, resize_x=W, resize_y=H)
     # Convert to float32 and normalize to [0,1]
@@ -41,7 +42,7 @@ def get_dali_pipeline(file_list, random_shuffle=True):
     images = fn.normalize(images, mean=0.0, stddev=255.0)
     # Transpose from NHWC to NCHW format
     images = fn.transpose(images, perm=[2, 0, 1])
-    return images, labels
+    return images, labels, galaxy_id
 
 # =======
 

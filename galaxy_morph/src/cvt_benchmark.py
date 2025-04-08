@@ -143,6 +143,9 @@ class Block(nn.Module):
     x = x + self.dropout(self.mhsa(self.norm1(x)))
     # the second part of the block is the MLP and layer of normalization
     x = x + self.dropout(self.ff(self.norm2(x)))
+
+    self.attention_map = self.mhsa.attention_map
+    
     return x
   
 class VisionTransformer(nn.Module):
@@ -162,7 +165,7 @@ class VisionTransformer(nn.Module):
     if self.cls_token: # if we have a cls token, create an embedding for it
        self.cls_token_embed = nn.Parameter(torch.randn(1, 1, embed_dim))
 
-  def forward(self, x, aux_layer=None, ch_out=False):
+  def forward(self, x, aux_layer=None, ch_out=False, return_attention=False):
     B = x.shape[0]
 
     rgb = x
@@ -179,6 +182,15 @@ class VisionTransformer(nn.Module):
         if self.cls_token:
             rgb = rgb[:, 1:, :]  
         rgb = einops.rearrange(rgb, 'b (h w) c -> b c h w', h=h_out, w=w_out).contiguous()
+    
+    if return_attention:
+        # Store attention maps from each block
+        attention_maps = []
+        for block in self.layers:
+            # Assuming your Block class stores attention maps
+            attention_maps.append(block.attention_map)
+        
+        return x, attention_maps
     
     return rgb
 

@@ -52,13 +52,13 @@ W, H, C = 224, 224, 4
 
 conf_file_list = create_file_list(imgs_path, soft_run1_conf, soft_run2_conf)
 
-n = 5000
+n = 1000
 bs = 128
 images_orig, labels_orig = data_setup(conf_file_list, hard_run2_conf, n)
 traino, valido, testo, y_traino, y_valido, y_testo = split_data(images_orig, labels_orig)
 
-epochs = 40
-lr = 1e-5
+epochs = 1
+lr = 1e-4
 tmax = epochs
 device= 'cuda' if torch.cuda.is_available() else 'cpu'
 embed_size = 64
@@ -67,7 +67,7 @@ train_iter, valid_iter, test_iter = create_dali_iterators(traino, valido, testo,
 
 gmorph_model = cvtb.CvT_bench(embed_size, 7)
 optimizer = torch.optim.AdamW(gmorph_model.parameters(), lr=lr, weight_decay=0.04, betas=(0.9, 0.999), eps=1e-8)
-warmup_epochs = 3
+warmup_epochs = 1
 scheduler = torch.optim.lr_scheduler.OneCycleLR(
     optimizer,
     max_lr=lr,
