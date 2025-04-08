@@ -87,6 +87,9 @@ results, results_class, train_pred, train_true, train_probs, valid_pred, valid_t
 
 y_true, preds = test_model(test_iter, gmorph_model, device)
 
+cvtb.cvt_attention_map(gmorph_model, test_iter, device, dest_dir='../output/benchmark/', sel_gal_ids=None)
+
+
 del gmorph_model
 del optimizer
 gc.collect()
@@ -103,3 +106,4 @@ with open('../output/benchmark/results_runs_class_bench_final_true.pkl', 'wb') a
 
 np.save('../output/benchmark/outputs_test_bench_final_true.npy', outputs, allow_pickle=True)
 np.save('../output/benchmark/labels_test_bench_final_true.npy', labels, allow_pickle=True)
+

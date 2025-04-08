@@ -32,17 +32,34 @@ def create_dali_file_list(file_list, hard_labels, output_filename):
 
 @pipeline_def
 def get_dali_pipeline(file_list, random_shuffle=True):
-    # DALI expects a text file where each line is "<image path> <label>"
-    images, labels = fn.readers.file(file_list=file_list, random_shuffle=random_shuffle, name="Reader")
-    galaxy_id = int(os.path.splitext(os.path.basename(images))[0])
+    # Read the file list
+    images, labels = fn.readers.file(
+        file_list=file_list, 
+        random_shuffle=random_shuffle, 
+        name="Reader"
+    )
+    
+    # Extract galaxy IDs from filenames using DALI operators
+    # First get the basename (remove path)
+    basenames = fn.basename(images)
+    # Remove extension and convert to integer
+    galaxy_ids = fn.cast(
+        fn.regex_replace(
+            fn.regex_replace(basenames, pattern="\.[^.]*$", replace=""),  # Remove extension
+            pattern="[^0-9]",  # Remove non-numeric characters
+            replace=""
+        ),
+        dtype=types.INT32
+    )
+    
+    # Process images
     images = fn.decoders.image(images, device="mixed", output_type=types.RGB)
     images = fn.resize(images, resize_x=W, resize_y=H)
-    # Convert to float32 and normalize to [0,1]
     images = fn.cast(images, dtype=types.FLOAT)
     images = fn.normalize(images, mean=0.0, stddev=255.0)
-    # Transpose from NHWC to NCHW format
     images = fn.transpose(images, perm=[2, 0, 1])
-    return images, labels, galaxy_id
+    
+    return images, labels, galaxy_ids
 
 # =======
 
@@ -98,22 +115,24 @@ def create_dali_iterators(x_train, x_valid, x_test, hard_labels, bs, dali_tmp_di
     # Create DALI generic iterators. Note: the output keys will be 'data' and 'label'
     train_iter = DALIGenericIterator(
         pipelines=[train_pipeline],
-        output_map=['data', 'label'],
+        output_map=['data', 'label', 'galaxy_id'],
         reader_name="Reader",
         auto_reset=True
     )
     valid_iter = DALIGenericIterator(
         pipelines=[valid_pipeline],
-        output_map=['data', 'label'],
+        output_map=['data', 'label', 'galaxy_id'],
         reader_name="Reader",
         auto_reset=True
     )
     test_iter = DALIGenericIterator(
         pipelines=[test_pipeline],
-        output_map=['data', 'label'],
+        output_map=['data', 'label', 'galaxy_id'],
         reader_name="Reader",
         auto_reset=True
     )
+    
+    return train_iter, valid_iter, test_iter
     
     return train_iter, valid_iter, test_iter
 

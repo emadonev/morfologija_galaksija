@@ -13,6 +13,8 @@ import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 
+import os
+import cv2
 # ---------------------
 
 class conv_embedd(nn.Module):
@@ -145,7 +147,7 @@ class Block(nn.Module):
     x = x + self.dropout(self.ff(self.norm2(x)))
 
     self.attention_map = self.mhsa.attention_map
-    
+
     return x
   
 class VisionTransformer(nn.Module):
@@ -247,3 +249,122 @@ class CvT_bench(nn.Module):
     x = x[:, 0, :]
     x = self.ff(x)
     return x  
+
+def cvt_attention_map(model, data_loader, device, dest_dir=None, sel_gal_ids=None):
+    """
+    Extract the attention maps from CvT model
+    Args:
+        model: CvT model
+        data_loader: DALI data loader
+        device: gpu or cpu
+        dest_dir: destination directory to save the maps
+        sel_gal_ids: list of galaxy IDs to visualize (optional)
+    """
+    model = model.to(device)
+    model.eval()
+
+    # Galaxy categories
+    gxy_labels = ['Er',
+                  'Ei',
+                  'Ec',
+                  'Seb',
+                  'Sen',
+                  'S',
+                  'SB']
+
+    for data in data_loader:
+        images = data[0]['data'].to(device)
+        labels = data[0]['label'].to(device).view(-1).long()
+        galaxy_ids = data[0]['galaxy_id']
+
+        with torch.no_grad():
+            # Forward pass through each stage
+            # Stage 1
+            x1, attn1 = model.stage1(images, return_attention=True)
+            # Stage 2
+            x2, attn2 = model.stage2(x1, return_attention=True)
+            # Stage 3
+            x3, attn3 = model.stage3(x2, return_attention=True)
+
+            # Process each image in the batch
+            for idx in range(images.shape[0]):
+                img = images[idx].cpu().numpy()
+                img = np.transpose(img, (1, 2, 0))
+                
+                gal_id = galaxy_ids[idx]
+                if sel_gal_ids and gal_id not in sel_gal_ids:
+                    continue
+
+                # Create figure for visualization
+                fig, axs = plt.subplots(3, 3, figsize=(15, 15))
+                
+                # Original image
+                axs[0, 0].imshow(img)
+                axs[0, 0].set_title(f"ID: {gal_id}\nTrue: {gxy_labels[labels[idx]]}", fontsize=12)
+                axs[0, 0].axis('off')
+
+                # Stage 1 attention
+                attn_map1 = attn1[idx].mean(dim=0).cpu().numpy()  # Average over heads
+                attn_map1 = cv2.resize(attn_map1, (224, 224))
+                axs[0, 1].imshow(attn_map1, cmap='jet')
+                axs[0, 1].set_title("Stage 1 Attention", fontsize=12)
+                axs[0, 1].axis('off')
+
+                # Stage 1 attention overlay
+                attn_mask1 = np.stack([attn_map1]*3, axis=2)
+                overlay1 = img * attn_mask1
+                axs[0, 2].imshow(overlay1)
+                axs[0, 2].set_title("Stage 1 Overlay", fontsize=12)
+                axs[0, 2].axis('off')
+
+                # Stage 2 attention
+                attn_map2 = attn2[idx].mean(dim=0).cpu().numpy()
+                attn_map2 = cv2.resize(attn_map2, (224, 224))
+                axs[1, 0].imshow(attn_map2, cmap='jet')
+                axs[1, 0].set_title("Stage 2 Attention", fontsize=12)
+                axs[1, 0].axis('off')
+
+                # Stage 2 attention overlay
+                attn_mask2 = np.stack([attn_map2]*3, axis=2)
+                overlay2 = img * attn_mask2
+                axs[1, 1].imshow(overlay2)
+                axs[1, 1].set_title("Stage 2 Overlay", fontsize=12)
+                axs[1, 1].axis('off')
+
+                # Stage 3 attention
+                attn_map3 = attn3[idx].mean(dim=0).cpu().numpy()
+                attn_map3 = cv2.resize(attn_map3, (224, 224))
+                axs[1, 2].imshow(attn_map3, cmap='jet')
+                axs[1, 2].set_title("Stage 3 Attention", fontsize=12)
+                axs[1, 2].axis('off')
+
+                # Stage 3 attention overlay
+                attn_mask3 = np.stack([attn_map3]*3, axis=2)
+                overlay3 = img * attn_mask3
+                axs[2, 0].imshow(overlay3)
+                axs[2, 0].set_title("Stage 3 Overlay", fontsize=12)
+                axs[2, 0].axis('off')
+
+                # Combined attention
+                combined_attn = (attn_map1 + attn_map2 + attn_map3) / 3
+                axs[2, 1].imshow(combined_attn, cmap='jet')
+                axs[2, 1].set_title("Combined Attention", fontsize=12)
+                axs[2, 1].axis('off')
+
+                # Combined overlay
+                combined_mask = np.stack([combined_attn]*3, axis=2)
+                combined_overlay = img * combined_mask
+                axs[2, 2].imshow(combined_overlay)
+                axs[2, 2].set_title("Combined Overlay", fontsize=12)
+                axs[2, 2].axis('off')
+
+                plt.tight_layout()
+
+                if dest_dir:
+                    plt.savefig(os.path.join(dest_dir, f"G{gal_id}_AttnMaps.png"))
+                    plt.close(fig)
+                else:
+                    plt.show()
+
+                if not sel_gal_ids and not dest_dir:
+                    break
