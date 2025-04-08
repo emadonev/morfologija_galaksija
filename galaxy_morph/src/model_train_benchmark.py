@@ -53,6 +53,9 @@ def train_epoch(model, optimizer, data_loader, loss_func, device, max_grad_norm)
             outputs = model(imgs)
             loss = loss_func(outputs, labels)
 
+            logits = outputs.logits
+            loss = loss_func(logits, labels)
+
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
         optimizer.step()
@@ -95,7 +98,8 @@ def valid_epoch(model, data_loader, loss_func, device):
 
             with torch.autocast(device_type=device, dtype=torch.float16):
                 outputs = model(imgs)
-                loss = loss_func(outputs, labels)
+                logits = outputs.logits
+                loss = loss_func(logits, labels)
 
             total_loss += loss.item() * batch_size
 
