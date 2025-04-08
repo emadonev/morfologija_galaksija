@@ -38,10 +38,9 @@ def train_epoch(model, optimizer, data_loader, loss_func, device):
     y_probs = []
 
     model.train()
-    for imgs, labels, coarse_labels in data_loader:
+    for imgs, labels in data_loader:
         imgs = imgs.to(device)
         labels = labels.to(device).view(-1)
-        coarse_labels = coarse_labels.to(device).view(-1)
 
         optimizer.zero_grad()
         
@@ -50,7 +49,7 @@ def train_epoch(model, optimizer, data_loader, loss_func, device):
             #log_probs = F.log_softmax(outputs, dim=1)
             #loss = loss_func(log_probs, labels)
 
-            outputs = model(imgs, coarse_labels)
+            outputs = model(imgs)
             loss = loss_func(outputs, labels)
 
         #------
@@ -83,13 +82,12 @@ def valid_epoch(model, data_loader, loss_func, device):
 
     model.eval()
     with torch.no_grad():
-        for imgs, labels, coarse_labels in data_loader:
+        for imgs, labels in data_loader:
             imgs = imgs.to(device)
             labels = labels.to(device).view(-1)
-            coarse_labels = coarse_labels.to(device).view(-1)
 
             with torch.autocast(device_type=device, dtype=torch.float16):
-                outputs = model(imgs, coarse_labels)
+                outputs = model(imgs)
                 loss = loss_func(outputs, labels)
 
             total_loss += loss.item()*labels.size(0)

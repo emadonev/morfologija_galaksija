@@ -54,7 +54,7 @@ W, H, C = 224, 224, 4
 conf_file_list = create_file_list(imgs_path, soft_run1_conf, soft_run2_conf)
 
 n = 5000
-bs = 32
+bs = 64
 images_orig, labels_orig = data_setup(conf_file_list, hard_run2_conf, n)
 traino, valido, testo, y_traino, y_valido, y_testo = split_data(images_orig, labels_orig)
 
@@ -111,16 +111,17 @@ np.save('../output/labels_test_run1_final.npy', labels, allow_pickle=True)
 """
 # RUN 2
 
-y_train1_array = np.asarray([t.detach().cpu().numpy() if t is not None else None for t in y_train1]).reshape(-1, 1)
-y_valid1_array  = np.asarray([t.detach().cpu().numpy() if t is not None else None for t in y_valid1]).reshape(-1, 1)
-#y_test1_array  = np.asarray([t.detach().cpu().numpy() if t is not None else None for t in y_test1]).reshape(-1, 1)
+y_train1_array = torch.tensor([t.detach().cpu().item() if t is not None else 0 for t in y_train1], dtype=torch.long)
+y_valid1_array = torch.tensor([t.detach().cpu().item() if t is not None else 0 for t in y_valid1], dtype=torch.long)
 
-print(y_train1_array[:3])
+print(y_train1_array[:4])
 
-encoder = OneHotEncoder(sparse_output=False)
-coarse_train = encoder.fit_transform(y_train1_array)
-coarse_valid = encoder.fit_transform(y_train1_array)
-#coarse_test = encoder.fit_transform(y_train1_array)
+# Convert to one-hot encoding using PyTorch
+def to_one_hot(tensor, num_classes):
+    return torch.zeros(tensor.shape[0], num_classes, device=tensor.device).scatter_(1, tensor.unsqueeze(1), 1)
+
+coarse_train = to_one_hot(y_train1_array, num_classes=3)
+coarse_valid = to_one_hot(y_valid1_array, num_classes=3)
 
 print(coarse_train[:5])
 
@@ -143,18 +144,18 @@ results, results_class, train_pred, train_true, train_probs, valid_pred, valid_t
 results_runs.append(('r2', results))
 results_runs_class.append(('r2', results_class))
 
-y_true, preds = test_model(test_dl, gmorph_model, device)
-outputs.append(preds.cpu().detach())
-labels.append(y_true.cpu().detach())
+#y_true, preds = test_model(test_dl, gmorph_model, device)
+#outputs.append(preds.cpu().detach())
+#labels.append(y_true.cpu().detach())
 
 del gmorph_model
 gc.collect()
 torch.cuda.empty_cache()
 
-outputs = np.array([x.cpu().detach().numpy() for x in outputs])
-labels = np.array([x.cpu().detach().numpy() for x in labels])
+#outputs = np.array([x.cpu().detach().numpy() for x in outputs])
+#labels = np.array([x.cpu().detach().numpy() for x in labels])
 
 np.save('../output/results_runs_run2_final.npy', results_runs, allow_pickle=True)
 np.save('../output/results_runs_class_run2_final.npy', results_runs_class, allow_pickle=True)
-np.save('../output/outputs_test_run2_final.npy', outputs, allow_pickle=True)
-np.save('../output/labels_test_run2_final.npy', labels, allow_pickle=True)
+#np.save('../output/outputs_test_run2_final.npy', outputs, allow_pickle=True)
+#np.save('../output/labels_test_run2_final.npy', labels, allow_pickle=True)

@@ -88,21 +88,20 @@ class galaxy_img_dataset_bench(Dataset):
 
     def __getitem__(self, idx):
         img, asset_id = img_process_bench(self.file_list[idx])
-        if self.coarse_set:
-            coarse_label = self.coarse_set.get(asset_id, None)
-            if coarse_label is None:
-                return None, None
-            coarse_label = torch.tensor(coarse_label, dtype=torch.float32)
         
         label = self.hard_labels.get(asset_id, None)
         if label is None:
             return None, None
         label = torch.tensor(label, dtype=torch.long)
 
-        if self.coarse_set:
+        if self.coarse_set is not None:
+            coarse_label = self.coarse_set[idx]
+            if coarse_label is None:
+                return None, None
+            coarse_label = coarse_label.clone().detach().to(dtype=torch.long)
             return torch.tensor(img, dtype=torch.float32), label, coarse_label
-        else:
-            return torch.tensor(img, dtype=torch.float32), label
+
+        return torch.tensor(img, dtype=torch.float32), label
 
 # =================
 
@@ -199,6 +198,11 @@ def create_data_loaders_bench(x_train, x_valid, x_test, hard_labels, bs, coarse_
     print(train_ds[0][0])
     print(y_train[0])
 
+    print(valid_ds[0][0])
+    print(y_valid[0])
+
+    print(y_train[:5])
+    print(type(y_train))
     train_dl = DataLoader(train_ds, batch_size=bs, shuffle=True, num_workers=32, pin_memory=True)
     valid_dl = DataLoader(valid_ds, batch_size=bs, shuffle=True, num_workers=32, pin_memory=True)
     test_dl  = DataLoader(test_ds,  batch_size=bs, shuffle=True, num_workers=32, pin_memory=True)

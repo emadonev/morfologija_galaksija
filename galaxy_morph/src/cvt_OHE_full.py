@@ -198,7 +198,7 @@ class VisionTransformer(nn.Module):
     rgb, h_out, w_out = self.embedding(x)  # shape: [B, num_tokens, embed_dim]
     
     # Early fusion: if a coarse one-hot vector is provided, embed it and fuse with every patch token.
-    if coarse_label is not None:
+    if coarse_label is not None and hasattr(self, 'coarse_embed'):
         # coarse_label shape should be [B, 3]
         coarse_emb = self.coarse_embed(coarse_label)       # shape: [B, embed_dim]
         # Expand to have the same token dimension as rgb.
@@ -281,11 +281,12 @@ class CvT(nn.Module):
     x = self.ff(x)
     return x
 
+'''
 class TwoStageCvT(nn.Module):
-    '''
-    This class combines the two CvT models where the first predicts coarse labels
-    and the second predicts fine labels using the coarse predictions
-    '''
+    
+    #This class combines the two CvT models where the first predicts coarse labels
+    #and the second predicts fine labels using the coarse predictions
+    
     def __init__(self, embed_dim, coarse_classes=3, fine_classes=7):
         super().__init__()
         
@@ -311,3 +312,4 @@ class TwoStageCvT(nn.Module):
         fine_preds = self.fine_model(x, coarse_labels=coarse_one_hot)
         
         return coarse_preds, fine_preds  
+'''
