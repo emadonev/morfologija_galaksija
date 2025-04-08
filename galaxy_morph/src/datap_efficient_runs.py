@@ -76,7 +76,14 @@ def split_data(x, y):
 
 # ==============
 def to_one_hot(tensor, num_classes):
-    return torch.zeros(tensor.shape[0], num_classes, device=tensor.device).scatter_(1, tensor.unsqueeze(1), 1)
+    if isinstance(tensor, int):
+        # Handle single integer label
+        one_hot = torch.zeros(num_classes)
+        one_hot[tensor] = 1
+        return one_hot
+    else:
+        # Handle tensor input
+        return torch.zeros(tensor.shape[0], num_classes, device=tensor.device).scatter_(1, tensor.unsqueeze(1), 1)
 
 def create_dali_file_list(file_list, hard_labels, output_filename, test=False, previous_coarse=None):
     with open(output_filename, 'w') as f:
@@ -126,11 +133,12 @@ class GalaxyIDSource:
 
 @pipeline_def
 def get_dali_pipeline(file_list, random_shuffle=True):
-    # Read the file list with labels
+    # Read the file list with labels and coarse labels
     images, labels, coarse_labels = fn.readers.file(
-        file_list=file_list, 
-        random_shuffle=random_shuffle, 
-        name="Reader"
+        file_list=file_list,
+        random_shuffle=random_shuffle,
+        name="Reader",
+        num_extra_outputs=2  # Specify that we have 2 extra columns (fine label and coarse label)
     )
     
     # Process images
@@ -139,6 +147,12 @@ def get_dali_pipeline(file_list, random_shuffle=True):
     images = fn.cast(images, dtype=types.FLOAT)
     images = fn.normalize(images, mean=0.0, stddev=255.0)
     images = fn.transpose(images, perm=[2, 0, 1])
+    
+    # Convert labels to integers
+    labels = fn.cast(labels, dtype=types.INT32)
+    
+    # Convert coarse labels to float32
+    coarse_labels = fn.cast(coarse_labels, dtype=types.FLOAT32)
     
     # Get galaxy IDs from external source
     galaxy_ids = fn.external_source(
@@ -155,7 +169,7 @@ def get_dali_pipeline(file_list, random_shuffle=True):
 
 # =======
 
-def create_dali_iterators(x_train, x_valid, x_test, hard_labels, bs, dali_tmp_dir="dali_filelists", hint=True, previous=None):
+def create_dali_iterators(x_train, x_valid, x_test, hard_labels, bs, dali_tmp_dir="dali_filelists", hint=False, previous=None):
     # Create a temporary directory to store file lists if it does not exist.
     os.makedirs(dali_tmp_dir, exist_ok=True)
     train_list_file = os.path.join(dali_tmp_dir, "train_list.txt")
