@@ -27,7 +27,7 @@ wandb.login()
 sys.path.insert(0,'../src/')
 
 # -----
-from datap_efficient import *
+from datap_efficient_bench import *
 from model_train_benchmark import *
 from labeling_system import *
 import cvt_benchmark_attn as cvtb
@@ -67,6 +67,8 @@ model = cvtb.CvT_bench(embed_size, 7)
 state_dict = torch.load(model_path)      
 model.load_state_dict(state_dict)         
 model.eval() 
+
+y_true, y_preds, galaxy_ids = test_model(test_iter, model, device)
 
 print('making attention maps')
 cvtb.cvt_attention_map(model, test_iter, device='cuda', dest_dir='../output/benchmark/')

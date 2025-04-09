@@ -47,8 +47,8 @@ class GalaxyIDSource:
         self.total_samples = len(self.galaxy_ids)
     
     def __call__(self, sample_info):
-        if sample_info.idx_in_epoch >= self.total_samples:
-            return np.array([0], dtype=np.int32)  # Return default ID for out-of-range indices
+        #if sample_info.idx_in_epoch >= self.total_samples:
+            #return np.array([0], dtype=np.int32)  # Return default ID for out-of-range indices
         return np.array([self.galaxy_ids[sample_info.idx_in_epoch]], dtype=np.int32)
 
 @pipeline_def
