@@ -127,24 +127,38 @@ def create_dali_file_list(file_list, hard_labels, output_filename, test=False, p
 # =======
 
 class GalaxyIDSource:
-    def __init__(self, file_list):
-        self.galaxy_ids = []
-        for f in file_list:
-            # Extract numeric part from filename
-            filename = os.path.basename(f)
-            # Remove file extension and any non-numeric characters
-            numeric_part = ''.join(filter(str.isdigit, os.path.splitext(filename)[0]))
-            if numeric_part:  # Only add if we found a numeric part
-                self.galaxy_ids.append(int(numeric_part))
-            else:
-                # If no numeric part found, use a default ID (0)
-                self.galaxy_ids.append(0)
-        self.total_samples = len(self.galaxy_ids)
+    def __init__(self, file_list_path):
+        # Read the file list
+        with open(file_list_path, 'r') as f:
+            self.file_list = [line.strip().split()[0] for line in f]  # Get just the file paths
+        self.total_samples = len(self.file_list)
     
     def __call__(self, sample_info):
-        if sample_info.idx_in_epoch >= self.total_samples:
-            return np.array([0], dtype=np.int32)  # Return default ID for out-of-range indices
-        return np.array([self.galaxy_ids[sample_info.idx_in_epoch]], dtype=np.int32)
+        try:
+            # Get the actual file path for this index
+            idx = sample_info.idx_in_epoch % self.total_samples
+            file_path = self.file_list[idx]
+            
+            # Extract the numeric part from the filename
+            filename = os.path.basename(file_path)
+            
+            # Split filename and extension
+            name_without_ext = os.path.splitext(filename)[0]
+            
+            # Extract numeric part
+            numeric_part = ''.join(filter(str.isdigit, name_without_ext))
+            
+            # Return the actual galaxy ID from the filename
+            if numeric_part:
+                galaxy_id = int(numeric_part)
+                return np.array([galaxy_id], dtype=np.int32)
+            else:
+                return np.array([0], dtype=np.int32)
+        except Exception as e:
+            print(f"Error in GalaxyIDSource: {str(e)}")
+            print(f"Sample info: {sample_info}")
+            print(f"Current index: {sample_info.idx_in_epoch}")
+            return np.array([0], dtype=np.int32)
 
 @pipeline_def
 def get_dali_pipeline(file_list, random_shuffle=True):

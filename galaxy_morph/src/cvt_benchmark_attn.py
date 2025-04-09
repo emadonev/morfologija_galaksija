@@ -301,7 +301,7 @@ class CvTOutput:
         self.hidden_states = hidden_states
         self.attentions = attentions
 
-def cvt_attention_map(model, data_loader, device, dest_dir=None, sel_gal_ids=None):
+def cvt_attention_map(model, data_loader, device, gxy_labels, dest_dir=None, sel_gal_ids=None):
     """
     Extract and visualize attention maps from CvT model
     Args:
@@ -311,63 +311,78 @@ def cvt_attention_map(model, data_loader, device, dest_dir=None, sel_gal_ids=Non
         dest_dir: destination directory to save the maps
         sel_gal_ids: list of galaxy IDs to visualize (optional)
     """
-    model = model.to(device)
+    print(f"Starting attention map visualization for {len(sel_gal_ids) if sel_gal_ids else 'all'} galaxies")
+    print(f"Destination directory: {dest_dir}")
+    
+    # Ensure model is in half precision and on the correct device
+    model = model.half().to(device)
     model.eval()
 
     # Galaxy categories
-    gxy_labels = ['Er', 'Ei', 'Ec', 'Seb', 'Sen', 'S', 'SB']
 
     def process_attention(attention_maps, batch_idx, stage_idx):
         """Helper function to process attention maps from a stage"""
         if not attention_maps:
+            print(f"No attention maps for stage {stage_idx + 1}")
             return None
         
-        # Calculate spatial dimensions based on stage
-        # Stage 1: 224/4 = 56, Stage 2: 56/2 = 28, Stage 3: 28/2 = 14
-        if stage_idx == 0:
-            h = w = 56  # Stage 1
-        elif stage_idx == 1:
-            h = w = 28  # Stage 2
-        else:
-            h = w = 14  # Stage 3
-            
-        # Average over all layers in the stage
-        stage_attention = torch.stack([attn[batch_idx] for attn in attention_maps])
-        # Average over heads and layers
-        avg_attention = stage_attention.mean(dim=(0, 1))  # Now shape (seq_len, seq_len)
-        
-        # For Stage 3, we need to handle the CLS token
-        if stage_idx == 2:
-            # Remove CLS token attention (first row and column)
-            avg_attention = avg_attention[1:, 1:]
-        
-        # Calculate attention rollout
-        # First, ensure we're working with proper attention scores
-        attention_probs = torch.softmax(avg_attention, dim=-1)
-        
-        # For visualization, we want to know how much each token attends to others
-        # We can sum over the rows to get the total attention received by each token
-        attention_scores = attention_probs.sum(dim=0)
-        
-        # Reshape to spatial dimensions
         try:
-            spatial_attention = attention_scores.reshape(h, w)
-        except RuntimeError as e:
-            print(f"Debug - Stage {stage_idx + 1}:")
-            print(f"Expected shape: ({h}, {w})")
-            print(f"Actual tensor size: {attention_scores.numel()}")
-            print(f"Attention tensor shape: {attention_scores.shape}")
-            raise e
-        
-        # Normalize attention weights
-        spatial_attention = (spatial_attention - spatial_attention.min()) / (spatial_attention.max() - spatial_attention.min() + 1e-8)
-        
-        return spatial_attention.cpu().numpy()
+            # Calculate spatial dimensions based on stage
+            # Stage 1: 224/4 = 56, Stage 2: 56/2 = 28, Stage 3: 28/2 = 14
+            if stage_idx == 0:
+                h = w = 56  # Stage 1
+            elif stage_idx == 1:
+                h = w = 28  # Stage 2
+            else:
+                h = w = 14  # Stage 3
+                
+            # Average over all layers in the stage
+            stage_attention = torch.stack([attn[batch_idx] for attn in attention_maps])
+            # Average over heads and layers
+            avg_attention = stage_attention.mean(dim=(0, 1))  # Now shape (seq_len, seq_len)
+            
+            # For Stage 3, we need to handle the CLS token
+            if stage_idx == 2:
+                # Remove CLS token attention (first row and column)
+                avg_attention = avg_attention[1:, 1:]
+            
+            # Calculate attention rollout
+            # First, ensure we're working with proper attention scores
+            attention_probs = torch.softmax(avg_attention, dim=-1)
+            
+            # For visualization, we want to know how much each token attends to others
+            # We can sum over the rows to get the total attention received by each token
+            attention_scores = attention_probs.sum(dim=0)
+            
+            # Reshape to spatial dimensions
+            try:
+                spatial_attention = attention_scores.reshape(h, w)
+            except RuntimeError as e:
+                print(f"Debug - Stage {stage_idx + 1}:")
+                print(f"Expected shape: ({h}, {w})")
+                print(f"Actual tensor size: {attention_scores.numel()}")
+                print(f"Attention tensor shape: {attention_scores.shape}")
+                raise e
+            
+            # Normalize attention weights
+            spatial_attention = (spatial_attention - spatial_attention.min()) / (spatial_attention.max() - spatial_attention.min() + 1e-8)
+            
+            # Convert to numpy and ensure float32
+            spatial_attention = spatial_attention.cpu().numpy().astype(np.float32)
+            
+            return spatial_attention
+        except Exception as e:
+            print(f"Error processing attention maps for stage {stage_idx + 1}: {str(e)}")
+            return None
 
+    processed_galaxies = set()
     for data in data_loader:
-        images = data[0]['data'].to(device)
+        # Convert inputs to half precision
+        images = data[0]['data'].to(device).half()
         labels = data[0]['label'].to(device).view(-1).long()
         galaxy_ids = data[0]['galaxy_id']
+
+        print(f"Processing batch with galaxy IDs: {galaxy_ids}")
 
         with torch.no_grad():
             # Get model outputs with attention
@@ -376,95 +391,125 @@ def cvt_attention_map(model, data_loader, device, dest_dir=None, sel_gal_ids=Non
 
             # Process each image in the batch
             for idx in range(images.shape[0]):
-                img = images[idx].cpu().numpy()
-                img = np.transpose(img, (1, 2, 0))
-                
-                gal_id = galaxy_ids[idx]
-                if sel_gal_ids and gal_id not in sel_gal_ids:
+                try:
+                    # Convert image to float32 and normalize to [0,1]
+                    img = images[idx].cpu().numpy()
+                    img = np.transpose(img, (1, 2, 0))
+                    img = img.astype(np.float32)
+                    
+                    gal_id = galaxy_ids[idx]
+                    print(f"Processing galaxy ID: {gal_id}")
+                    
+                    if sel_gal_ids and gal_id not in sel_gal_ids:
+                        print(f"Skipping galaxy {gal_id} - not in selected list")
+                        continue
+                    
+                    if gal_id in processed_galaxies:
+                        print(f"Skipping galaxy {gal_id} - already processed")
+                        continue
+                        
+                    processed_galaxies.add(gal_id)
+                    print(f"Generating attention maps for galaxy {gal_id}")
+
+                    # Create figure for visualization
+                    fig, axs = plt.subplots(3, 3, figsize=(15, 15))
+                    
+                    # Original image
+                    axs[0, 0].imshow(img)
+                    axs[0, 0].set_title(f"ID: {gal_id}\nTrue: {gxy_labels[labels[idx]]}", fontsize=12)
+                    axs[0, 0].axis('off')
+
+                    # Process attention maps from each stage
+                    attn_map1 = process_attention(stage1_attns, idx, 0)  # Stage 1
+                    attn_map2 = process_attention(stage2_attns, idx, 1)  # Stage 2
+                    attn_map3 = process_attention(stage3_attns, idx, 2)  # Stage 3
+
+                    # Stage 1 attention
+                    if attn_map1 is not None:
+                        try:
+                            attn_map1_resized = cv2.resize(attn_map1, (224, 224))
+                            axs[0, 1].imshow(attn_map1_resized, cmap='jet')
+                            axs[0, 1].set_title("Stage 1 Attention", fontsize=12)
+                            axs[0, 1].axis('off')
+
+                            # Stage 1 attention overlay
+                            attn_mask1 = np.stack([attn_map1_resized]*3, axis=2)
+                            overlay1 = img * attn_mask1
+                            axs[0, 2].imshow(overlay1)
+                            axs[0, 2].set_title("Stage 1 Overlay", fontsize=12)
+                            axs[0, 2].axis('off')
+                        except Exception as e:
+                            print(f"Error processing stage 1 attention: {str(e)}")
+
+                    # Stage 2 attention
+                    if attn_map2 is not None:
+                        try:
+                            attn_map2_resized = cv2.resize(attn_map2, (224, 224))
+                            axs[1, 0].imshow(attn_map2_resized, cmap='jet')
+                            axs[1, 0].set_title("Stage 2 Attention", fontsize=12)
+                            axs[1, 0].axis('off')
+
+                            # Stage 2 attention overlay
+                            attn_mask2 = np.stack([attn_map2_resized]*3, axis=2)
+                            overlay2 = img * attn_mask2
+                            axs[1, 1].imshow(overlay2)
+                            axs[1, 1].set_title("Stage 2 Overlay", fontsize=12)
+                            axs[1, 1].axis('off')
+                        except Exception as e:
+                            print(f"Error processing stage 2 attention: {str(e)}")
+
+                    # Stage 3 attention
+                    if attn_map3 is not None:
+                        try:
+                            attn_map3_resized = cv2.resize(attn_map3, (224, 224))
+                            axs[1, 2].imshow(attn_map3_resized, cmap='jet')
+                            axs[1, 2].set_title("Stage 3 Attention", fontsize=12)
+                            axs[1, 2].axis('off')
+
+                            # Stage 3 attention overlay
+                            attn_mask3 = np.stack([attn_map3_resized]*3, axis=2)
+                            overlay3 = img * attn_mask3
+                            axs[2, 0].imshow(overlay3)
+                            axs[2, 0].set_title("Stage 3 Overlay", fontsize=12)
+                            axs[2, 0].axis('off')
+                        except Exception as e:
+                            print(f"Error processing stage 3 attention: {str(e)}")
+
+                    # Combined attention
+                    if all(m is not None for m in [attn_map1, attn_map2, attn_map3]):
+                        try:
+                            attn_map1_resized = cv2.resize(attn_map1, (224, 224))
+                            attn_map2_resized = cv2.resize(attn_map2, (224, 224))
+                            attn_map3_resized = cv2.resize(attn_map3, (224, 224))
+                            combined_attn = (attn_map1_resized + attn_map2_resized + attn_map3_resized) / 3
+                            axs[2, 1].imshow(combined_attn, cmap='jet')
+                            axs[2, 1].set_title("Combined Attention", fontsize=12)
+                            axs[2, 1].axis('off')
+
+                            # Combined overlay
+                            combined_mask = np.stack([combined_attn]*3, axis=2)
+                            combined_overlay = img * combined_mask
+                            axs[2, 2].imshow(combined_overlay)
+                            axs[2, 2].set_title("Combined Overlay", fontsize=12)
+                            axs[2, 2].axis('off')
+                        except Exception as e:
+                            print(f"Error processing combined attention: {str(e)}")
+
+                    plt.tight_layout()
+
+                    if dest_dir:
+                        os.makedirs(dest_dir, exist_ok=True)
+                        output_path = os.path.join(dest_dir, f"G{gal_id}_AttnMaps.png")
+                        print(f"Saving attention maps to: {output_path}")
+                        plt.savefig(output_path)
+                        plt.close(fig)
+                    else:
+                        plt.show()
+
+                    # Check if we've processed all selected galaxies
+                    if sel_gal_ids and len(processed_galaxies) >= len(sel_gal_ids):
+                        print("All selected galaxies processed")
+                        return
+                except Exception as e:
+                    print(f"Error processing galaxy {gal_id}: {str(e)}")
                     continue
-
-                # Create figure for visualization
-                fig, axs = plt.subplots(3, 3, figsize=(15, 15))
-                
-                # Original image
-                axs[0, 0].imshow(img)
-                axs[0, 0].set_title(f"ID: {gal_id}\nTrue: {gxy_labels[labels[idx]]}", fontsize=12)
-                axs[0, 0].axis('off')
-
-                # Process attention maps from each stage
-                attn_map1 = process_attention(stage1_attns, idx, 0)  # Stage 1
-                attn_map2 = process_attention(stage2_attns, idx, 1)  # Stage 2
-                attn_map3 = process_attention(stage3_attns, idx, 2)  # Stage 3
-
-                # Stage 1 attention
-                if attn_map1 is not None:
-                    attn_map1_resized = cv2.resize(attn_map1, (224, 224))
-                    axs[0, 1].imshow(attn_map1_resized, cmap='jet')
-                    axs[0, 1].set_title("Stage 1 Attention", fontsize=12)
-                    axs[0, 1].axis('off')
-
-                    # Stage 1 attention overlay
-                    attn_mask1 = np.stack([attn_map1_resized]*3, axis=2)
-                    overlay1 = img * attn_mask1
-                    axs[0, 2].imshow(overlay1)
-                    axs[0, 2].set_title("Stage 1 Overlay", fontsize=12)
-                    axs[0, 2].axis('off')
-
-                # Stage 2 attention
-                if attn_map2 is not None:
-                    attn_map2_resized = cv2.resize(attn_map2, (224, 224))
-                    axs[1, 0].imshow(attn_map2_resized, cmap='jet')
-                    axs[1, 0].set_title("Stage 2 Attention", fontsize=12)
-                    axs[1, 0].axis('off')
-
-                    # Stage 2 attention overlay
-                    attn_mask2 = np.stack([attn_map2_resized]*3, axis=2)
-                    overlay2 = img * attn_mask2
-                    axs[1, 1].imshow(overlay2)
-                    axs[1, 1].set_title("Stage 2 Overlay", fontsize=12)
-                    axs[1, 1].axis('off')
-
-                # Stage 3 attention
-                if attn_map3 is not None:
-                    attn_map3_resized = cv2.resize(attn_map3, (224, 224))
-                    axs[1, 2].imshow(attn_map3_resized, cmap='jet')
-                    axs[1, 2].set_title("Stage 3 Attention", fontsize=12)
-                    axs[1, 2].axis('off')
-
-                    # Stage 3 attention overlay
-                    attn_mask3 = np.stack([attn_map3_resized]*3, axis=2)
-                    overlay3 = img * attn_mask3
-                    axs[2, 0].imshow(overlay3)
-                    axs[2, 0].set_title("Stage 3 Overlay", fontsize=12)
-                    axs[2, 0].axis('off')
-
-                # Combined attention
-                if all(m is not None for m in [attn_map1, attn_map2, attn_map3]):
-                    attn_map1_resized = cv2.resize(attn_map1, (224, 224))
-                    attn_map2_resized = cv2.resize(attn_map2, (224, 224))
-                    attn_map3_resized = cv2.resize(attn_map3, (224, 224))
-                    combined_attn = (attn_map1_resized + attn_map2_resized + attn_map3_resized) / 3
-                    axs[2, 1].imshow(combined_attn, cmap='jet')
-                    axs[2, 1].set_title("Combined Attention", fontsize=12)
-                    axs[2, 1].axis('off')
-
-                    # Combined overlay
-                    combined_mask = np.stack([combined_attn]*3, axis=2)
-                    combined_overlay = img * combined_mask
-                    axs[2, 2].imshow(combined_overlay)
-                    axs[2, 2].set_title("Combined Overlay", fontsize=12)
-                    axs[2, 2].axis('off')
-
-                plt.tight_layout()
-
-                if dest_dir:
-                    os.makedirs(dest_dir, exist_ok=True)
-                    plt.savefig(os.path.join(dest_dir, f"G{gal_id}_AttnMaps.png"))
-                    plt.close(fig)
-                else:
-                    plt.show()
-
-                if not sel_gal_ids and not dest_dir:
-                    break
-                break
-            break
