@@ -115,7 +115,7 @@ train_dl_run2, valid_dl_run2, test_dl_run2, train_coarse2, valid_coarse2, test_c
 
 gmorph_model = cvt.CvT_cyclic(embed_size, 7, hint=True)
 
-optimizer = torch.optim.AdamW(gmorph_model.parameters(), lr=lr, weight_decay=0.04, betas=(0.9, 0.999), eps=1e-8)
+optimizer = torch.optim.AdamW(gmorph_model.parameters(), lr=lr, weight_decay=0.05, betas=(0.9, 0.999), eps=1e-8) # change from 01 weight decay
 warmup_epochs = 5
 scheduler = torch.optim.lr_scheduler.OneCycleLR(
     optimizer,
