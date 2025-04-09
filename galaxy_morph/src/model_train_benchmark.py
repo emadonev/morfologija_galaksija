@@ -187,28 +187,39 @@ def train_model(n_epochs, model, train_loader, valid_loader, loss_func2, optimiz
 
     return results, results_class, train_pred, train_true, train_probs, train_galaxy_ids, valid_pred, valid_true, valid_probs, valid_galaxy_ids
 
-
 def test_model(dataset, model, device):
     out = torch.tensor([])
     y_true = torch.tensor([])
     y_preds = torch.tensor([])
     galaxy_ids = []
 
+    # Ensure model is on the correct device and in half precision
+    model = model.to(device)
     model.eval()
+    
     with torch.no_grad():
         for i, data in enumerate(dataset):
-            imgs = data[0]['data'].to(device)
+            # Convert input to half precision and move to device
+            imgs = data[0]['data'].to(device).half()
             labels = data[0]['label'].to(device).view(-1).long()
             batch_galaxy_ids = data[0]['galaxy_id'].cpu().numpy()
-
-            with torch.autocast(device_type=device, dtype=torch.float16):
-                outputs = model(imgs)
-
-            probabilities = F.softmax(outputs, dim=1)
+            
+            # Forward pass
+            outputs = model(imgs)
+            
+            # Get logits from CvTOutput object
+            logits = outputs.logits
+            
+            # Convert outputs back to float32 for softmax if needed
+            if logits.dtype == torch.float16:
+                logits = logits.float()
+                
+            probabilities = F.softmax(logits, dim=1)
             preds = probabilities.argmax(dim=1)
             
             y_true = torch.cat((y_true, labels.detach().cpu()), 0)
             y_preds = torch.cat((y_preds, preds.detach().cpu()), 0)
+            out = torch.cat((out, probabilities.detach().cpu()), 0)
             galaxy_ids.extend(batch_galaxy_ids.tolist())
 
-    return y_true, y_preds, galaxy_ids
+    return y_true, y_preds, out, galaxy_ids
